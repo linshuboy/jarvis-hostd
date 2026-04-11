@@ -1,0 +1,16 @@
+{
+  "gateway": {
+    "ws_url": "ws://127.0.0.1:8001/ws/node",
+    "tls_mode": "system"
+  },
+  "display_name": "build-host-windows",
+  "heartbeat_seconds": 20,
+  "components": {
+    "host": {
+      "enabled": true
+    }
+  },
+  "logging": {
+    "level": "info"
+  }
+}

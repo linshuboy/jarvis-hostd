@@ -1,0 +1,23 @@
+[Unit]
+Description=JARVISAI host runtime daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hostd
+Group=hostd
+WorkingDirectory=__HOSTD_WORKING_DIR__
+ExecStartPre=__HOSTD_BIN_PATH__ config validate --config __HOSTD_CONFIG_PATH__ --state __HOSTD_STATE_PATH__
+ExecStart=__HOSTD_BIN_PATH__ run --config __HOSTD_CONFIG_PATH__ --state __HOSTD_STATE_PATH__
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=__HOSTD_STATE_DIR__
+ReadOnlyPaths=__HOSTD_CONFIG_DIR__
+
+[Install]
+WantedBy=multi-user.target
