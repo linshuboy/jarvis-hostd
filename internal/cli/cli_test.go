@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -266,6 +267,61 @@ func TestAppSetTokenFallsBackToPersistedState(t *testing.T) {
 	}
 	if output["has_runtime_token"] != true {
 		t.Fatalf("unexpected output: %#v", output)
+	}
+}
+
+func TestAppShutdownFallsBackWithoutControlServer(t *testing.T) {
+	tempDir := t.TempDir()
+	statePath := filepath.Join(tempDir, "state.json")
+	var stdout bytes.Buffer
+	err := Execute(context.Background(), []string{
+		"app",
+		"shutdown",
+		"--state", statePath,
+	}, Dependencies{
+		Stdout: &stdout,
+		Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("execute app shutdown: %v", err)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if output["shutdown_requested"] != false {
+		t.Fatalf("unexpected shutdown result: %#v", output)
+	}
+	if output["helper_available"] != false {
+		t.Fatalf("unexpected helper availability: %#v", output)
+	}
+}
+
+func TestServiceStatusLaunchdPrintsUnsupportedStatusOnNonDarwin(t *testing.T) {
+	var stdout bytes.Buffer
+	err := Execute(context.Background(), []string{
+		"service",
+		"status-launchd",
+	}, Dependencies{
+		Stdout: &stdout,
+		Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("execute service status-launchd: %v", err)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	status, ok := output["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected status payload: %#v", output["status"])
+	}
+	if status["service_manager"] != "launchd" {
+		t.Fatalf("unexpected service manager: %#v", status["service_manager"])
+	}
+	if status["supported"] == true && runtime.GOOS != "darwin" {
+		t.Fatalf("launchd should not be supported on %s: %#v", runtime.GOOS, status)
 	}
 }
 

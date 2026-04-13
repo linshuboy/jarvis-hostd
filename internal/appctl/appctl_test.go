@@ -45,6 +45,11 @@ func TestServerRoundTrip(t *testing.T) {
 			current.ConnectionState = "connecting"
 			return current, nil
 		},
+		Shutdown: func() error {
+			current.ConnectionState = "stopping"
+			current.Online = false
+			return nil
+		},
 	})
 	if err != nil {
 		if errors.Is(err, ErrUnavailable) || stringsContains(err.Error(), "operation not permitted") {
@@ -86,6 +91,10 @@ func TestServerRoundTrip(t *testing.T) {
 	}
 	if snapshot.HasRuntimeToken || snapshot.PairingState != "unpaired" {
 		t.Fatalf("unexpected snapshot after clear-token: %#v", snapshot)
+	}
+
+	if err := RequestShutdown(socketPath); err != nil {
+		t.Fatalf("request shutdown: %v", err)
 	}
 }
 

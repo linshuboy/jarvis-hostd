@@ -20,6 +20,7 @@ const (
 	setTokenPath     = "/v1/runtime-token"
 	clearTokenPath   = "/v1/runtime-token/clear"
 	reconnectPath    = "/v1/reconnect"
+	shutdownPath     = "/v1/shutdown"
 	httpClientTimout = 3 * time.Second
 )
 
@@ -44,6 +45,7 @@ type ServerOptions struct {
 	SetRuntimeToken   func(string) (Snapshot, error)
 	ClearRuntimeToken func() (Snapshot, error)
 	RequestReconnect  func() (Snapshot, error)
+	Shutdown          func() error
 }
 
 type Server struct {
@@ -68,6 +70,9 @@ func Start(ctx context.Context, options ServerOptions) (*Server, error) {
 	}
 	if options.RequestReconnect == nil {
 		return nil, fmt.Errorf("app control reconnect handler is required")
+	}
+	if options.Shutdown == nil {
+		return nil, fmt.Errorf("app control shutdown handler is required")
 	}
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
 		return nil, err
@@ -140,6 +145,17 @@ func Start(ctx context.Context, options ServerOptions) (*Server, error) {
 		}
 		writeJSON(writer, snapshot)
 	})
+	mux.HandleFunc(shutdownPath, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if err := options.Shutdown(); err != nil {
+			writeError(writer, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(writer, map[string]bool{"ok": true})
+	})
 	server := &http.Server{
 		Handler: mux,
 	}
@@ -191,6 +207,11 @@ func ClearRuntimeToken(socketPath string) (Snapshot, error) {
 
 func RequestReconnect(socketPath string) (Snapshot, error) {
 	return doJSONRequest[Snapshot](socketPath, http.MethodPost, reconnectPath, map[string]string{})
+}
+
+func RequestShutdown(socketPath string) error {
+	_, err := doJSONRequest[map[string]bool](socketPath, http.MethodPost, shutdownPath, map[string]string{})
+	return err
 }
 
 func doJSONRequest[T any](socketPath string, method string, route string, body any) (T, error) {

@@ -95,6 +95,20 @@ func (s *sequenceDialer) CallCount() int {
 	return s.calls
 }
 
+type blockingDialer struct {
+	called chan struct{}
+}
+
+func (d blockingDialer) Dial(ctx context.Context, options wsclient.Options) (wsclient.Conn, error) {
+	_ = options
+	select {
+	case d.called <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func TestRunOncePairingRequiredPersistsPendingState(t *testing.T) {
 	store := state.NewStore(filepath.Join(t.TempDir(), "state.json"))
 	component, err := host.NewComponent(host.Options{ComponentID: host.ComponentID, RuntimeVersion: "0.1.0"})
@@ -380,6 +394,61 @@ func TestSetRuntimeTokenTriggersImmediateReconnect(t *testing.T) {
 	}
 	if connectFrame.Params.Auth.Token != "runtime-token-9" {
 		t.Fatalf("unexpected reconnect token: %s", connectFrame.Params.Auth.Token)
+	}
+}
+
+func TestRequestShutdownStopsRunner(t *testing.T) {
+	store := state.NewStore(filepath.Join(t.TempDir(), "state.json"))
+	component, err := host.NewComponent(host.Options{ComponentID: host.ComponentID, RuntimeVersion: "0.1.0"})
+	if err != nil {
+		t.Fatalf("new component: %v", err)
+	}
+	dialer := blockingDialer{called: make(chan struct{}, 1)}
+	runner := New(Options{
+		Config: config.Config{
+			Gateway: config.GatewayConfig{
+				WSURL:   "ws://gateway.example/ws/node",
+				TLSMode: "off",
+			},
+			DisplayName:      "Host A",
+			HeartbeatSeconds: 20,
+			Components: config.ComponentsConfig{
+				Host: config.HostComponentConfig{
+					Enabled: true,
+					Methods: append([]string(nil), host.Methods...),
+				},
+			},
+		},
+		StateStore:    store,
+		HostComponent: component,
+		Dialer:        dialer,
+		Logger:        log.New(io.Discard, "", 0),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runner.Run(ctx)
+	}()
+
+	select {
+	case <-dialer.called:
+	case <-time.After(time.Second):
+		t.Fatalf("runner did not start dialing")
+	}
+
+	if err := runner.requestShutdown(); err != nil {
+		t.Fatalf("request shutdown: %v", err)
+	}
+
+	select {
+	case err := <-runDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("unexpected shutdown error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("runner did not stop after shutdown request")
 	}
 }
 

@@ -44,6 +44,8 @@ type Runner struct {
 	online        bool
 	stateName     string
 	controlPath   string
+	runCancelMu   sync.Mutex
+	runCancel     context.CancelFunc
 }
 
 func New(options Options) *Runner {
@@ -65,6 +67,9 @@ func New(options Options) *Runner {
 }
 
 func (r *Runner) Run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	r.setRunCancel(cancel)
+	defer r.setRunCancel(nil)
 	if r.stateStore == nil {
 		return fmt.Errorf("state store is required")
 	}
@@ -74,18 +79,18 @@ func (r *Runner) Run(ctx context.Context) error {
 	if r.dialer == nil {
 		r.dialer = wsclient.DefaultDialer{}
 	}
-	if err := r.startControlServer(ctx); err != nil {
+	if err := r.startControlServer(runCtx); err != nil {
 		r.logger.Printf("app control server unavailable: %v", err)
 	}
 	backoff := time.Second
 	for {
 		r.setConnectionState("connecting", false)
-		err := r.runOnce(ctx)
+		err := r.runOnce(runCtx)
 		if err == nil || errors.Is(err, context.Canceled) {
 			return err
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if runCtx.Err() != nil {
+			return runCtx.Err()
 		}
 		if errors.Is(err, errReconnectRequested) {
 			backoff = time.Second
@@ -99,8 +104,8 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.logger.Printf("connection loop ended: %v", err)
 		}
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-runCtx.Done():
+			return runCtx.Err()
 		case <-r.reconnectCh:
 			backoff = time.Second
 			continue
@@ -401,6 +406,7 @@ func (r *Runner) startControlServer(ctx context.Context) error {
 		SetRuntimeToken:   r.setRuntimeToken,
 		ClearRuntimeToken: r.clearRuntimeToken,
 		RequestReconnect:  r.requestReconnectSnapshot,
+		Shutdown:          r.requestShutdown,
 	})
 	if err != nil {
 		return err
@@ -480,6 +486,23 @@ func (r *Runner) requestReconnect() {
 	case r.reconnectCh <- struct{}{}:
 	default:
 	}
+}
+
+func (r *Runner) requestShutdown() error {
+	r.setConnectionState("stopping", false)
+	r.runCancelMu.Lock()
+	cancel := r.runCancel
+	r.runCancelMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return nil
+}
+
+func (r *Runner) setRunCancel(cancel context.CancelFunc) {
+	r.runCancelMu.Lock()
+	defer r.runCancelMu.Unlock()
+	r.runCancel = cancel
 }
 
 func (r *Runner) setConnectionState(stateName string, online bool) {

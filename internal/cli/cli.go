@@ -16,6 +16,7 @@ import (
 	"jarvisai/runtime/hostd/internal/config"
 	"jarvisai/runtime/hostd/internal/host"
 	"jarvisai/runtime/hostd/internal/hostdrun"
+	"jarvisai/runtime/hostd/internal/launchd"
 	"jarvisai/runtime/hostd/internal/state"
 	"jarvisai/runtime/hostd/internal/winsvc"
 	"jarvisai/runtime/hostd/internal/wsclient"
@@ -82,6 +83,8 @@ func appCommand(args []string, stdout io.Writer, stderr io.Writer) error {
 		return appClearToken(args[1:], stdout, stderr)
 	case "reconnect":
 		return appReconnect(args[1:], stdout, stderr)
+	case "shutdown":
+		return appShutdown(args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unsupported app subcommand: %s", args[0])
 	}
@@ -148,12 +151,26 @@ func versionCommand(stdout io.Writer) error {
 }
 
 func serviceCommand(ctx context.Context, args []string, deps Dependencies) error {
+	stdout := deps.Stdout
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	stderr := deps.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 	if len(args) == 0 {
 		return fmt.Errorf("service subcommand is required")
 	}
 	switch args[0] {
 	case "run":
 		return serviceRunCommand(ctx, args[1:], deps)
+	case "status-launchd":
+		return serviceStatusLaunchd(ctx, args[1:], stdout, stderr)
+	case "install-launchd":
+		return serviceInstallLaunchd(ctx, args[1:], stdout, stderr)
+	case "uninstall-launchd":
+		return serviceUninstallLaunchd(ctx, args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unsupported service subcommand: %s", args[0])
 	}
@@ -179,6 +196,60 @@ func serviceRunCommand(ctx context.Context, args []string, deps Dependencies) er
 		return err
 	}
 	return winsvc.Run(ctx, "hostd", logger, runner.Run)
+}
+
+func serviceStatusLaunchd(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("service status-launchd", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath, statePath, launchdOptions, err := parseLaunchdCommandOptions(flags, args, false)
+	if err != nil {
+		return err
+	}
+	status, err := launchd.StatusOf(ctx, launchdOptions.Label, launchdOptions.PlistPath, launchd.DefaultCommandRunner{})
+	if err != nil {
+		return err
+	}
+	return printJSON(stdout, map[string]any{
+		"config_path": configPath,
+		"state_path":  statePath,
+		"status":      status,
+	})
+}
+
+func serviceInstallLaunchd(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("service install-launchd", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath, statePath, launchdOptions, err := parseLaunchdCommandOptions(flags, args, true)
+	if err != nil {
+		return err
+	}
+	status, err := launchd.Install(ctx, launchdOptions, launchd.DefaultCommandRunner{})
+	if err != nil {
+		return err
+	}
+	return printJSON(stdout, map[string]any{
+		"config_path": configPath,
+		"state_path":  statePath,
+		"status":      status,
+	})
+}
+
+func serviceUninstallLaunchd(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("service uninstall-launchd", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath, statePath, launchdOptions, err := parseLaunchdCommandOptions(flags, args, false)
+	if err != nil {
+		return err
+	}
+	status, err := launchd.Uninstall(ctx, launchdOptions.Label, launchdOptions.PlistPath, launchd.DefaultCommandRunner{})
+	if err != nil {
+		return err
+	}
+	return printJSON(stdout, map[string]any{
+		"config_path": configPath,
+		"state_path":  statePath,
+		"status":      status,
+	})
 }
 
 func pairCommand(args []string, stdout io.Writer, stderr io.Writer) error {
@@ -414,7 +485,11 @@ func printUsage(output io.Writer) {
 	_, _ = fmt.Fprintln(output, "hostd app set-token --token TOKEN [--config PATH] [--state PATH] [--control-socket PATH]")
 	_, _ = fmt.Fprintln(output, "hostd app clear-token [--config PATH] [--state PATH] [--control-socket PATH]")
 	_, _ = fmt.Fprintln(output, "hostd app reconnect [--config PATH] [--state PATH] [--control-socket PATH]")
+	_, _ = fmt.Fprintln(output, "hostd app shutdown [--config PATH] [--state PATH] [--control-socket PATH]")
 	_, _ = fmt.Fprintln(output, "hostd config validate [flags]")
+	_, _ = fmt.Fprintln(output, "hostd service status-launchd [--config PATH] [--state PATH] [--label NAME] [--plist PATH]")
+	_, _ = fmt.Fprintln(output, "hostd service install-launchd [--config PATH] [--state PATH] [--bin PATH] [--label NAME] [--plist PATH]")
+	_, _ = fmt.Fprintln(output, "hostd service uninstall-launchd [--config PATH] [--state PATH] [--label NAME] [--plist PATH]")
 	_, _ = fmt.Fprintln(output, "hostd service run [flags]")
 	_, _ = fmt.Fprintln(output, "hostd version")
 	_, _ = fmt.Fprintln(output, "hostd pair status [--config PATH] [--state PATH]")
@@ -599,6 +674,37 @@ func appReconnect(args []string, stdout io.Writer, stderr io.Writer) error {
 	return printJSON(stdout, buildAppSnapshotPayload("control-socket", true, configPath, statePath, controlSocketPath, snapshot))
 }
 
+func appShutdown(args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("app shutdown", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	options, err := parsePathOptions(flags, args)
+	if err != nil {
+		return err
+	}
+	_, _, controlSocketPath, err := resolveAppPaths(options)
+	if err != nil {
+		return err
+	}
+	err = appctl.RequestShutdown(controlSocketPath)
+	if err != nil {
+		if !errors.Is(err, appctl.ErrUnavailable) {
+			return err
+		}
+		return printJSON(stdout, map[string]any{
+			"bridge_mode":         "state-fallback",
+			"helper_available":    false,
+			"shutdown_requested":  false,
+			"control_socket_path": controlSocketPath,
+		})
+	}
+	return printJSON(stdout, map[string]any{
+		"bridge_mode":         "control-socket",
+		"helper_available":    true,
+		"shutdown_requested":  true,
+		"control_socket_path": controlSocketPath,
+	})
+}
+
 func resolveAppPaths(options config.Options) (string, string, string, error) {
 	configPath, statePath, err := config.ResolvePaths(options)
 	if err != nil {
@@ -681,4 +787,53 @@ func buildAppSnapshotPayload(
 		"connection_state":    snapshot.ConnectionState,
 		"helper_pid":          snapshot.HelperPID,
 	}
+}
+
+func parseLaunchdCommandOptions(flags *flag.FlagSet, args []string, includeBinary bool) (string, string, launchd.InstallOptions, error) {
+	var (
+		configPath string
+		statePath  string
+		binaryPath string
+		label      string
+		plistPath  string
+		workingDir string
+		stdoutPath string
+		stderrPath string
+	)
+	flags.StringVar(&configPath, "config", "", "path to hostd config.json")
+	flags.StringVar(&statePath, "state", "", "path to hostd state.json")
+	flags.StringVar(&binaryPath, "bin", "", "path to hostd binary used by launchd")
+	flags.StringVar(&label, "label", launchd.DefaultLabel, "launchd label")
+	flags.StringVar(&plistPath, "plist", "", "launchd plist path")
+	flags.StringVar(&workingDir, "working-dir", "", "working directory for launchd agent")
+	flags.StringVar(&stdoutPath, "stdout-log", "", "launchd stdout log path")
+	flags.StringVar(&stderrPath, "stderr-log", "", "launchd stderr log path")
+	if err := flags.Parse(args); err != nil {
+		return "", "", launchd.InstallOptions{}, err
+	}
+	resolvedConfigPath, resolvedStatePath, err := config.ResolvePaths(config.Options{
+		ConfigPath: configPath,
+		StatePath:  statePath,
+	})
+	if err != nil {
+		return "", "", launchd.InstallOptions{}, err
+	}
+	launchdOptions := launchd.InstallOptions{
+		Label:      label,
+		PlistPath:  plistPath,
+		BinaryPath: binaryPath,
+		ConfigPath: resolvedConfigPath,
+		StatePath:  resolvedStatePath,
+		WorkingDir: workingDir,
+		StdoutPath: stdoutPath,
+		StderrPath: stderrPath,
+	}
+	if includeBinary && strings.TrimSpace(launchdOptions.BinaryPath) == "" {
+		executablePath, executableErr := os.Executable()
+		if executableErr != nil {
+			return "", "", launchd.InstallOptions{}, executableErr
+		}
+		launchdOptions.BinaryPath = executablePath
+	}
+	return resolvedConfigPath, resolvedStatePath, launchdOptions, nil
 }
