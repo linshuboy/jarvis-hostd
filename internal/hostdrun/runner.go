@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"jarvisai/runtime/hostd/internal/appctl"
-	"jarvisai/runtime/hostd/internal/buildinfo"
-	"jarvisai/runtime/hostd/internal/config"
-	"jarvisai/runtime/hostd/internal/host"
-	"jarvisai/runtime/hostd/internal/protocol"
-	"jarvisai/runtime/hostd/internal/state"
-	"jarvisai/runtime/hostd/internal/wsclient"
+	"agi/runtime/hostd/internal/appctl"
+	"agi/runtime/hostd/internal/buildinfo"
+	"agi/runtime/hostd/internal/config"
+	"agi/runtime/hostd/internal/host"
+	"agi/runtime/hostd/internal/protocol"
+	"agi/runtime/hostd/internal/state"
+	"agi/runtime/hostd/internal/wsclient"
 )
 
 var errPairingRequired = errors.New("runtime pairing required")

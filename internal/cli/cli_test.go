@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"jarvisai/runtime/hostd/internal/buildinfo"
-	"jarvisai/runtime/hostd/internal/config"
-	"jarvisai/runtime/hostd/internal/state"
+	"agi/runtime/hostd/internal/buildinfo"
+	"agi/runtime/hostd/internal/config"
+	"agi/runtime/hostd/internal/state"
 )
 
 type fakeRunner struct {

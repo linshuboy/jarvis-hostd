@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"jarvisai/runtime/hostd/internal/appctl"
-	"jarvisai/runtime/hostd/internal/buildinfo"
-	"jarvisai/runtime/hostd/internal/config"
-	"jarvisai/runtime/hostd/internal/host"
-	"jarvisai/runtime/hostd/internal/state"
+	"agi/runtime/hostd/internal/appctl"
+	"agi/runtime/hostd/internal/buildinfo"
+	"agi/runtime/hostd/internal/config"
+	"agi/runtime/hostd/internal/host"
+	"agi/runtime/hostd/internal/state"
 )
 
 type inviteClaimResponse struct {

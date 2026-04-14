@@ -1,4 +1,4 @@
-module jarvisai/runtime/hostd
+module agi/runtime/hostd
 
 go 1.24.0
 

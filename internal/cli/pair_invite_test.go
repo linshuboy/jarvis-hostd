@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"jarvisai/runtime/hostd/internal/config"
-	"jarvisai/runtime/hostd/internal/state"
+	"agi/runtime/hostd/internal/config"
+	"agi/runtime/hostd/internal/state"
 )
 
 func TestPairClaimInvitePersistsConfigAndState(t *testing.T) {
@@ -106,14 +106,14 @@ func TestPairClaimInvitePersistsConfigAndState(t *testing.T) {
 }
 
 func TestParseInviteURLDerivesGatewayWSURL(t *testing.T) {
-	claimURL, gatewayWSURL, tlsMode, err := parseInviteURL("https://jarvis.example.com/api/host/runtime/invites/claim?code=invite-1")
+	claimURL, gatewayWSURL, tlsMode, err := parseInviteURL("https://agi.example.com/api/host/runtime/invites/claim?code=invite-1")
 	if err != nil {
 		t.Fatalf("parse invite url: %v", err)
 	}
-	if claimURL != "https://jarvis.example.com/api/host/runtime/invites/claim?code=invite-1" {
+	if claimURL != "https://agi.example.com/api/host/runtime/invites/claim?code=invite-1" {
 		t.Fatalf("unexpected claim url: %s", claimURL)
 	}
-	if gatewayWSURL != "wss://jarvis.example.com/ws/node" {
+	if gatewayWSURL != "wss://agi.example.com/ws/node" {
 		t.Fatalf("unexpected gateway ws url: %s", gatewayWSURL)
 	}
 	if tlsMode != "system" {

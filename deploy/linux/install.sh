@@ -79,12 +79,12 @@ install_template() {
 DRY_RUN="0"
 INSTALL_ROOT="${HOSTD_INSTALL_ROOT:-}"
 BIN_SRC="./hostd"
-BIN_DST="${HOSTD_BIN_DST:-/usr/local/bin/hostd}"
+BIN_DST="${HOSTD_BIN_DST:-/opt/jarvis/bin/hostd}"
 UNIT_DST="${HOSTD_UNIT_DST:-/etc/systemd/system/hostd.service}"
 SYSUSERS_DST="${HOSTD_SYSUSERS_DST:-/usr/lib/sysusers.d/hostd.conf}"
 TMPFILES_DST="${HOSTD_TMPFILES_DST:-/usr/lib/tmpfiles.d/hostd.conf}"
-CONFIG_DST="${HOSTD_CONFIG_DST:-/etc/hostd/config.json}"
-STATE_PATH="${HOSTD_STATE_PATH:-/var/lib/hostd/state.json}"
+CONFIG_DST="${HOSTD_CONFIG_DST:-/opt/jarvis/etc/config.json}"
+STATE_PATH="${HOSTD_STATE_PATH:-/opt/jarvis/var/state.json}"
 WORKING_DIR="${HOSTD_WORKING_DIR:-}"
 
 while [[ $# -gt 0 ]]; do

@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"jarvisai/runtime/hostd/internal/cli"
+	"agi/runtime/hostd/internal/cli"
 )
 
 func main() {

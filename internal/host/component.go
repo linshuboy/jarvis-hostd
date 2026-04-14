@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"jarvisai/runtime/hostd/internal/protocol"
+	"agi/runtime/hostd/internal/protocol"
 )
 
 const (

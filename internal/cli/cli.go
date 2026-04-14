@@ -11,15 +11,15 @@ import (
 	"os"
 	"strings"
 
-	"jarvisai/runtime/hostd/internal/appctl"
-	"jarvisai/runtime/hostd/internal/buildinfo"
-	"jarvisai/runtime/hostd/internal/config"
-	"jarvisai/runtime/hostd/internal/host"
-	"jarvisai/runtime/hostd/internal/hostdrun"
-	"jarvisai/runtime/hostd/internal/launchd"
-	"jarvisai/runtime/hostd/internal/state"
-	"jarvisai/runtime/hostd/internal/winsvc"
-	"jarvisai/runtime/hostd/internal/wsclient"
+	"agi/runtime/hostd/internal/appctl"
+	"agi/runtime/hostd/internal/buildinfo"
+	"agi/runtime/hostd/internal/config"
+	"agi/runtime/hostd/internal/host"
+	"agi/runtime/hostd/internal/hostdrun"
+	"agi/runtime/hostd/internal/launchd"
+	"agi/runtime/hostd/internal/state"
+	"agi/runtime/hostd/internal/winsvc"
+	"agi/runtime/hostd/internal/wsclient"
 )
 
 type Runner interface {
