@@ -125,6 +125,21 @@ func Load(options Options) (Loaded, error) {
 	}, nil
 }
 
+func Save(path string, cfg Config) error {
+	if err := normalize(&cfg); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	payload, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	payload = append(payload, '\n')
+	return os.WriteFile(path, payload, 0o644)
+}
+
 func ResolvePaths(options Options) (string, string, error) {
 	defaultConfigPath, defaultStatePath, err := DefaultPaths()
 	if err != nil {

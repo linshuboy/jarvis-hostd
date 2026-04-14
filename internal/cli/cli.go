@@ -259,6 +259,8 @@ func pairCommand(args []string, stdout io.Writer, stderr io.Writer) error {
 	switch args[0] {
 	case "status":
 		return pairStatus(args[1:], stdout, stderr)
+	case "claim-invite":
+		return pairClaimInvite(args[1:], stdout, stderr)
 	case "set-token":
 		return pairSetToken(args[1:], stdout, stderr)
 	case "clear-token":
@@ -493,6 +495,7 @@ func printUsage(output io.Writer) {
 	_, _ = fmt.Fprintln(output, "hostd service run [flags]")
 	_, _ = fmt.Fprintln(output, "hostd version")
 	_, _ = fmt.Fprintln(output, "hostd pair status [--config PATH] [--state PATH]")
+	_, _ = fmt.Fprintln(output, "hostd pair claim-invite --invite-url URL [--config PATH] [--state PATH] [--control-socket PATH]")
 	_, _ = fmt.Fprintln(output, "hostd pair set-token --token TOKEN [--config PATH] [--state PATH]")
 	_, _ = fmt.Fprintln(output, "hostd pair clear-token [--config PATH] [--state PATH]")
 	_, _ = fmt.Fprintln(output, "hostd pair revoke [--config PATH] [--state PATH]")
