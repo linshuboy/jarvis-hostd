@@ -1,0 +1,166 @@
+name: hostd-build
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Upload built assets to the main repository release'
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: 'Release tag in the main repository'
+        required: false
+        type: string
+      main_repository:
+        description: 'Main repository that owns the release'
+        required: false
+        type: string
+      source_repository:
+        description: 'Main repository that requested this build'
+        required: false
+        type: string
+      source_sha:
+        description: 'Main repository source SHA for traceability'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: runtime/hostd
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runtime/hostd
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: runtime/hostd/go.mod
+      - run: go test ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runtime/hostd
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: runtime/hostd/go.mod
+      - id: build
+        name: Build hostd archive
+        shell: bash
+        env:
+          MAIN_REPOSITORY: ${{ inputs.main_repository || vars.MAIN_RELEASE_REPOSITORY }}
+          REQUESTED_RELEASE_TAG: ${{ inputs.release_tag }}
+          REQUESTED_PUBLISH_RELEASE: ${{ inputs.publish_release }}
+        run: |
+          set -euo pipefail
+          release_tag="${REQUESTED_RELEASE_TAG:-}"
+          if [[ -z "$release_tag" ]]; then
+            release_tag="${GITHUB_REF_NAME}"
+          fi
+
+          should_publish=false
+          if [[ "${REQUESTED_PUBLISH_RELEASE:-}" == "true" || "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            should_publish=true
+            if [[ -z "${MAIN_REPOSITORY:-}" ]]; then
+              echo "Missing main_repository input or MAIN_RELEASE_REPOSITORY variable for release upload." >&2
+              exit 1
+            fi
+          fi
+
+          if [[ "$release_tag" == v* ]]; then
+            version="${release_tag#v}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${release_tag}"
+          else
+            version="dev-${GITHUB_SHA::12}"
+          fi
+
+          commit="${GITHUB_SHA::12}"
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          goos="${{ matrix.goos }}"
+          goarch="${{ matrix.goarch }}"
+          dist_dir="dist/hostd/${goos}-${goarch}"
+          package_dir="release/hostd-${version}-${goos}-${goarch}"
+          bin_name="hostd"
+          if [[ "${goos}" == "windows" ]]; then
+            bin_name="hostd.exe"
+          fi
+
+          mkdir -p "${dist_dir}" "${package_dir}"
+          (
+            cd runtime/hostd
+            GOOS="${goos}" GOARCH="${goarch}" go build \
+              -trimpath \
+              -ldflags="-s -w -X agi/runtime/hostd/internal/buildinfo.Version=${version} -X agi/runtime/hostd/internal/buildinfo.Commit=${commit} -X agi/runtime/hostd/internal/buildinfo.BuildDate=${build_date}" \
+              -o "../../${dist_dir}/${bin_name}" \
+              ./cmd/hostd
+          )
+          cp "${dist_dir}/${bin_name}" "${package_dir}/${bin_name}"
+          if [[ "${goos}" == "windows" ]]; then
+            (
+              cd release
+              zip -r "hostd-${version}-${goos}-${goarch}.zip" "hostd-${version}-${goos}-${goarch}"
+            )
+            archive_path="release/hostd-${version}-${goos}-${goarch}.zip"
+          else
+            tar -C release -czf "release/hostd-${version}-${goos}-${goarch}.tar.gz" "hostd-${version}-${goos}-${goarch}"
+            archive_path="release/hostd-${version}-${goos}-${goarch}.tar.gz"
+          fi
+
+          echo "archive_path=${archive_path}" >>"$GITHUB_OUTPUT"
+          echo "main_repository=${MAIN_REPOSITORY:-}" >>"$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >>"$GITHUB_OUTPUT"
+          echo "should_publish=${should_publish}" >>"$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hostd-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ steps.build.outputs.archive_path }}
+          if-no-files-found: error
+      - name: Upload hostd asset to main release
+        if: steps.build.outputs.should_publish == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+          MAIN_REPOSITORY: ${{ steps.build.outputs.main_repository }}
+          RELEASE_TAG: ${{ steps.build.outputs.release_tag }}
+          ARCHIVE_PATH: ${{ steps.build.outputs.archive_path }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "Missing CROSS_REPO_TOKEN secret for release upload." >&2
+            exit 1
+          fi
+          if ! gh release view "${RELEASE_TAG}" --repo "${MAIN_REPOSITORY}" >/dev/null 2>&1; then
+            gh release create "${RELEASE_TAG}" --repo "${MAIN_REPOSITORY}" --title "${RELEASE_TAG}" --notes "Release assets are uploaded by split child repositories."
+          fi
+          gh release upload "${RELEASE_TAG}" "${ARCHIVE_PATH}" --repo "${MAIN_REPOSITORY}" --clobber
