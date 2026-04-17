@@ -23,6 +23,12 @@ import (
 var errPairingRequired = errors.New("runtime pairing required")
 var errReconnectRequested = errors.New("runtime reconnect requested")
 
+const (
+	maxHeartbeatProbeInterval = 5 * time.Second
+	minHeartbeatAckTimeout    = 3 * time.Second
+	maxHeartbeatAckTimeout    = 10 * time.Second
+)
+
 type Options struct {
 	Config        config.Config
 	StateStore    *state.Store
@@ -194,6 +200,8 @@ func (r *Runner) runOnce(ctx context.Context) error {
 	if hello.Policy.TickIntervalMS > 0 {
 		interval = time.Duration(hello.Policy.TickIntervalMS) * time.Millisecond
 	}
+	probeInterval := heartbeatProbeInterval(interval)
+	ackTimeout := heartbeatAckTimeout(probeInterval)
 	readFrames := make(chan protocol.RequestFrame)
 	readErrors := make(chan error, 1)
 	go func() {
@@ -206,8 +214,11 @@ func (r *Runner) runOnce(ctx context.Context) error {
 			readFrames <- frame
 		}
 	}()
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(probeInterval)
 	defer ticker.Stop()
+	pongTimer := time.NewTimer(ackTimeout)
+	stopTimer(pongTimer)
+	awaitingPong := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -216,6 +227,9 @@ func (r *Runner) runOnce(ctx context.Context) error {
 			r.setConnectionState("connecting", false)
 			return errReconnectRequested
 		case <-ticker.C:
+			if awaitingPong {
+				continue
+			}
 			if err := conn.WriteJSON(ctx, r.buildHeartbeat(current, accepted)); err != nil {
 				_, _ = r.stateStore.Update(func(value *state.State) error {
 					value.LastError = err.Error()
@@ -224,6 +238,19 @@ func (r *Runner) runOnce(ctx context.Context) error {
 				r.setConnectionState("backoff", false)
 				return err
 			}
+			awaitingPong = true
+			resetTimer(pongTimer, ackTimeout)
+		case <-pongTimer.C:
+			if !awaitingPong {
+				continue
+			}
+			timeoutErr := fmt.Errorf("heartbeat acknowledgement timeout after %s", ackTimeout.Round(time.Second))
+			_, _ = r.stateStore.Update(func(value *state.State) error {
+				value.LastError = timeoutErr.Error()
+				return nil
+			})
+			r.setConnectionState("backoff", false)
+			return timeoutErr
 		case err := <-readErrors:
 			_, _ = r.stateStore.Update(func(value *state.State) error {
 				value.LastError = err.Error()
@@ -232,6 +259,10 @@ func (r *Runner) runOnce(ctx context.Context) error {
 			r.setConnectionState("backoff", false)
 			return err
 		case frame := <-readFrames:
+			if awaitingPong {
+				awaitingPong = false
+				stopTimer(pongTimer)
+			}
 			switch frame.Type {
 			case "event":
 				continue
@@ -438,6 +469,50 @@ func (r *Runner) snapshotStatus() (appctl.Snapshot, error) {
 		HelperPID:         os.Getpid(),
 		ControlSocketPath: r.controlPath,
 	}, nil
+}
+
+func heartbeatProbeInterval(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return time.Second
+	}
+	if interval > maxHeartbeatProbeInterval {
+		return maxHeartbeatProbeInterval
+	}
+	return interval
+}
+
+func heartbeatAckTimeout(probeInterval time.Duration) time.Duration {
+	if probeInterval <= 0 {
+		probeInterval = time.Second
+	}
+	timeout := probeInterval + (probeInterval / 2)
+	if timeout < minHeartbeatAckTimeout {
+		timeout = minHeartbeatAckTimeout
+	}
+	if timeout > maxHeartbeatAckTimeout {
+		timeout = maxHeartbeatAckTimeout
+	}
+	return timeout
+}
+
+func stopTimer(timer *time.Timer) {
+	if timer == nil {
+		return
+	}
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+}
+
+func resetTimer(timer *time.Timer, duration time.Duration) {
+	if timer == nil {
+		return
+	}
+	stopTimer(timer)
+	timer.Reset(duration)
 }
 
 func (r *Runner) setRuntimeToken(token string) (appctl.Snapshot, error) {

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -53,6 +54,60 @@ func (f *fakeConn) WriteJSON(ctx context.Context, value any) error {
 }
 
 func (f *fakeConn) Close() error {
+	return nil
+}
+
+type stallingConn struct {
+	readFrames []any
+	writes     []any
+	index      int
+	closed     chan struct{}
+	closeOnce  sync.Once
+}
+
+func newStallingConn(frames []any) *stallingConn {
+	return &stallingConn{
+		readFrames: append([]any(nil), frames...),
+		closed:     make(chan struct{}),
+	}
+}
+
+func (f *stallingConn) ReadJSON(ctx context.Context, value any) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	if f.index < len(f.readFrames) {
+		payload, err := json.Marshal(f.readFrames[f.index])
+		if err != nil {
+			return err
+		}
+		f.index++
+		return json.Unmarshal(payload, value)
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-f.closed:
+		return io.EOF
+	}
+}
+
+func (f *stallingConn) WriteJSON(ctx context.Context, value any) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	f.writes = append(f.writes, value)
+	return nil
+}
+
+func (f *stallingConn) Close() error {
+	f.closeOnce.Do(func() {
+		close(f.closed)
+	})
 	return nil
 }
 
@@ -394,6 +449,94 @@ func TestSetRuntimeTokenTriggersImmediateReconnect(t *testing.T) {
 	}
 	if connectFrame.Params.Auth.Token != "runtime-token-9" {
 		t.Fatalf("unexpected reconnect token: %s", connectFrame.Params.Auth.Token)
+	}
+}
+
+func TestRunOnceReconnectsAfterHeartbeatAcknowledgementTimeout(t *testing.T) {
+	store := state.NewStore(filepath.Join(t.TempDir(), "state.json"))
+	component, err := host.NewComponent(host.Options{ComponentID: host.ComponentID, RuntimeVersion: "0.1.0"})
+	if err != nil {
+		t.Fatalf("new component: %v", err)
+	}
+	conn := newStallingConn([]any{
+		map[string]any{
+			"type": "res",
+			"id":   "connect-1",
+			"ok":   true,
+			"payload": map[string]any{
+				"type":     "hello-ok",
+				"protocol": 1,
+				"policy": map[string]any{
+					"tickIntervalMs": 100,
+					"maxTtlSeconds":  60,
+				},
+				"runtime": map[string]any{
+					"runtimeId":          "runtime-1",
+					"pairingState":       "paired",
+					"acceptedComponents": []string{host.ComponentID},
+				},
+			},
+		},
+	})
+	runner := New(Options{
+		Config: config.Config{
+			Gateway: config.GatewayConfig{
+				WSURL:   "ws://gateway.example/ws/node",
+				TLSMode: "off",
+			},
+			DisplayName:      "Host A",
+			HeartbeatSeconds: 20,
+			Components: config.ComponentsConfig{
+				Host: config.HostComponentConfig{
+					Enabled: true,
+					Methods: append([]string(nil), host.Methods...),
+				},
+			},
+		},
+		StateStore:    store,
+		HostComponent: component,
+		Dialer:        fakeDialer{conn: conn},
+		Logger:        log.New(io.Discard, "", 0),
+	})
+
+	started := time.Now()
+	err = runner.runOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "heartbeat acknowledgement timeout") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("heartbeat acknowledgement timeout should fail fast, got %s", elapsed)
+	}
+	if len(conn.writes) < 2 {
+		t.Fatalf("expected connect request and at least one heartbeat, got %d writes", len(conn.writes))
+	}
+	current, loadErr := store.Load()
+	if loadErr != nil {
+		t.Fatalf("load state: %v", loadErr)
+	}
+	if !strings.Contains(current.LastError, "heartbeat acknowledgement timeout") {
+		t.Fatalf("unexpected last error: %s", current.LastError)
+	}
+}
+
+func TestHeartbeatProbeIntervalCapsAtFiveSeconds(t *testing.T) {
+	if got := heartbeatProbeInterval(20 * time.Second); got != 5*time.Second {
+		t.Fatalf("unexpected probe interval: %s", got)
+	}
+	if got := heartbeatProbeInterval(2 * time.Second); got != 2*time.Second {
+		t.Fatalf("unexpected probe interval: %s", got)
+	}
+}
+
+func TestHeartbeatAckTimeoutHasReasonableBounds(t *testing.T) {
+	if got := heartbeatAckTimeout(100 * time.Millisecond); got != 3*time.Second {
+		t.Fatalf("unexpected minimum ack timeout: %s", got)
+	}
+	if got := heartbeatAckTimeout(5 * time.Second); got != 7500*time.Millisecond {
+		t.Fatalf("unexpected capped ack timeout: %s", got)
+	}
+	if got := heartbeatAckTimeout(10 * time.Second); got != 10*time.Second {
+		t.Fatalf("unexpected max ack timeout: %s", got)
 	}
 }
 
