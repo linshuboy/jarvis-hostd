@@ -38,15 +38,24 @@ var Methods = []string{
 type Options struct {
 	ComponentID        string
 	RuntimeVersion     string
+	Methods            []string
+	WorkspaceHints     []WorkspaceHint
 	MaxReadBytes       int
 	MaxOutputBytes     int
 	DefaultExecTimeout time.Duration
+}
+
+type WorkspaceHint struct {
+	Name     string
+	RootPath string
 }
 
 type Component struct {
 	componentID        string
 	runtimeVersion     string
 	hostname           string
+	methods            []string
+	workspaceHints     []WorkspaceHint
 	maxReadBytes       int
 	maxOutputBytes     int
 	defaultExecTimeout time.Duration
@@ -80,10 +89,16 @@ func NewComponent(options Options) (*Component, error) {
 	if options.DefaultExecTimeout <= 0 {
 		options.DefaultExecTimeout = DefaultExecTimeout
 	}
+	methods, err := normalizeMethods(options.Methods)
+	if err != nil {
+		return nil, err
+	}
 	return &Component{
 		componentID:        componentID,
 		runtimeVersion:     strings.TrimSpace(options.RuntimeVersion),
 		hostname:           hostname,
+		methods:            methods,
+		workspaceHints:     normalizeWorkspaceHints(options.WorkspaceHints),
 		maxReadBytes:       options.MaxReadBytes,
 		maxOutputBytes:     options.MaxOutputBytes,
 		defaultExecTimeout: options.DefaultExecTimeout,
@@ -95,7 +110,7 @@ func (c *Component) Definition() protocol.RuntimeComponent {
 		ComponentID: c.componentID,
 		Kind:        "host",
 		Subtype:     "local",
-		Methods:     append([]string(nil), Methods...),
+		Methods:     append([]string(nil), c.methods...),
 		Health:      c.Health(),
 		Metadata:    c.Metadata(),
 	}
@@ -110,12 +125,31 @@ func (c *Component) Health() protocol.Health {
 }
 
 func (c *Component) Metadata() map[string]any {
-	return map[string]any{
+	metadata := map[string]any{
 		"os":              runtime.GOOS,
 		"arch":            runtime.GOARCH,
 		"hostname":        c.hostname,
 		"runtime_version": c.runtimeVersion,
 	}
+	if len(c.workspaceHints) > 0 {
+		hints := make([]map[string]string, 0, len(c.workspaceHints))
+		for _, hint := range c.workspaceHints {
+			item := map[string]string{}
+			if strings.TrimSpace(hint.Name) != "" {
+				item["name"] = strings.TrimSpace(hint.Name)
+			}
+			if strings.TrimSpace(hint.RootPath) != "" {
+				item["root_path"] = strings.TrimSpace(hint.RootPath)
+			}
+			if len(item) > 0 {
+				hints = append(hints, item)
+			}
+		}
+		if len(hints) > 0 {
+			metadata["workspace_hints"] = hints
+		}
+	}
+	return metadata
 }
 
 func (c *Component) Dispatch(method string, params map[string]any) (map[string]any, *Error) {
@@ -497,6 +531,57 @@ func fromPathError(path string, err error) *Error {
 	default:
 		return &Error{Code: "PATH_ERROR", Message: err.Error()}
 	}
+}
+
+func normalizeMethods(values []string) ([]string, error) {
+	if len(values) == 0 {
+		return append([]string(nil), Methods...), nil
+	}
+	supported := make(map[string]bool, len(Methods))
+	for _, method := range Methods {
+		supported[method] = true
+	}
+	seen := map[string]bool{}
+	methods := make([]string, 0, len(values))
+	for _, value := range values {
+		method := strings.TrimSpace(value)
+		if method == "" {
+			continue
+		}
+		if !supported[method] {
+			return nil, fmt.Errorf("unsupported host method: %s", method)
+		}
+		if seen[method] {
+			continue
+		}
+		seen[method] = true
+		methods = append(methods, method)
+	}
+	if len(methods) == 0 {
+		return nil, &Error{Code: "INVALID_METHODS", Message: "at least one host method is required"}
+	}
+	return methods, nil
+}
+
+func normalizeWorkspaceHints(values []WorkspaceHint) []WorkspaceHint {
+	hints := make([]WorkspaceHint, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		hint := WorkspaceHint{
+			Name:     strings.TrimSpace(value.Name),
+			RootPath: strings.TrimSpace(value.RootPath),
+		}
+		if hint.Name == "" && hint.RootPath == "" {
+			continue
+		}
+		key := hint.Name + "\x00" + hint.RootPath
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		hints = append(hints, hint)
+	}
+	return hints
 }
 
 func stringValue(value any) string {

@@ -100,3 +100,35 @@ func TestComponentWriteDoesNotCreateParentDirectory(t *testing.T) {
 		t.Fatalf("parent directory should not be created")
 	}
 }
+
+func TestComponentDefinitionUsesDeclaredMethodsAndWorkspaceHints(t *testing.T) {
+	component, err := NewComponent(Options{
+		ComponentID:    ComponentID,
+		RuntimeVersion: "0.1.0",
+		Methods:        []string{"host.fs.read", "host.fs.list"},
+		WorkspaceHints: []WorkspaceHint{
+			{Name: "Repo", RootPath: "/workspace/repo"},
+			{Name: "Home", RootPath: "/home/agi"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new component: %v", err)
+	}
+	definition := component.Definition()
+	if len(definition.Methods) != 2 || definition.Methods[0] != "host.fs.read" || definition.Methods[1] != "host.fs.list" {
+		t.Fatalf("unexpected methods: %#v", definition.Methods)
+	}
+	rawHints, ok := definition.Metadata["workspace_hints"].([]map[string]string)
+	if !ok {
+		t.Fatalf("workspace hints should be metadata []map[string]string: %#v", definition.Metadata["workspace_hints"])
+	}
+	if len(rawHints) != 2 {
+		t.Fatalf("unexpected workspace hints: %#v", rawHints)
+	}
+	if rawHints[0]["name"] != "Repo" || rawHints[0]["root_path"] != "/workspace/repo" {
+		t.Fatalf("unexpected first workspace hint: %#v", rawHints[0])
+	}
+	if rawHints[1]["name"] != "Home" || rawHints[1]["root_path"] != "/home/agi" {
+		t.Fatalf("unexpected second workspace hint: %#v", rawHints[1])
+	}
+}

@@ -7,7 +7,25 @@
   "heartbeat_seconds": 20,
   "components": {
     "host": {
-      "enabled": true
+      "enabled": true,
+      "methods": [
+        "host.fs.stat",
+        "host.fs.list",
+        "host.fs.read",
+        "host.fs.write",
+        "host.fs.mkdir",
+        "host.exec.run"
+      ],
+      "workspace_hints": [
+        {
+          "name": "Profile",
+          "root_path": "C:\\Users\\agi"
+        },
+        {
+          "name": "Projects",
+          "root_path": "C:\\Users\\agi\\Projects"
+        }
+      ]
     }
   },
   "logging": {

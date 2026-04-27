@@ -92,6 +92,8 @@ func pairClaimInvite(args []string, stdout io.Writer, stderr io.Writer) error {
 	hostComponent, err := host.NewComponent(host.Options{
 		ComponentID:        host.ComponentID,
 		RuntimeVersion:     buildinfo.RuntimeVersion(),
+		Methods:            append([]string(nil), loaded.Config.Components.Host.Methods...),
+		WorkspaceHints:     hostWorkspaceHints(loaded.Config.Components.Host.WorkspaceHints),
 		MaxReadBytes:       host.DefaultMaxReadBytes,
 		MaxOutputBytes:     host.DefaultMaxOutputBytes,
 		DefaultExecTimeout: host.DefaultExecTimeout,

@@ -35,8 +35,31 @@ type GatewayConfig struct {
 }
 
 type HostComponentConfig struct {
-	Enabled bool     `json:"enabled"`
-	Methods []string `json:"methods"`
+	Enabled        bool            `json:"enabled"`
+	Methods        []string        `json:"methods"`
+	WorkspaceHints []WorkspaceHint `json:"workspace_hints,omitempty"`
+}
+
+type WorkspaceHint struct {
+	Name     string `json:"name"`
+	RootPath string `json:"root_path"`
+}
+
+func (w *WorkspaceHint) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Name          string `json:"name"`
+		RootPath      string `json:"root_path"`
+		RootPathCamel string `json:"rootPath"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	w.Name = strings.TrimSpace(raw.Name)
+	w.RootPath = strings.TrimSpace(raw.RootPath)
+	if w.RootPath == "" {
+		w.RootPath = strings.TrimSpace(raw.RootPathCamel)
+	}
+	return nil
 }
 
 type ComponentsConfig struct {
@@ -256,6 +279,9 @@ func applyFile(path string, cfg *Config) error {
 		if len(fileCfg.Components.Host.Methods) > 0 {
 			cfg.Components.Host.Methods = append([]string(nil), fileCfg.Components.Host.Methods...)
 		}
+		if len(fileCfg.Components.Host.WorkspaceHints) > 0 {
+			cfg.Components.Host.WorkspaceHints = append([]WorkspaceHint(nil), fileCfg.Components.Host.WorkspaceHints...)
+		}
 	}
 	if fileCfg.Logging != nil && fileCfg.Logging.Level != "" {
 		cfg.Logging.Level = fileCfg.Logging.Level
@@ -292,6 +318,9 @@ func applyEnv(cfg *Config) error {
 			return err
 		}
 		cfg.Components.Host.Enabled = parsed
+	}
+	if raw := strings.TrimSpace(os.Getenv("HOSTD_COMPONENTS_HOST_METHODS")); raw != "" {
+		cfg.Components.Host.Methods = splitCSV(raw)
 	}
 	return nil
 }
@@ -344,9 +373,15 @@ func normalize(cfg *Config) error {
 		cfg.Logging.Level = "info"
 	}
 	if cfg.Components.Host.Enabled {
-		cfg.Components.Host.Methods = append([]string(nil), hostMethods...)
+		methods, err := normalizeHostMethods(cfg.Components.Host.Methods)
+		if err != nil {
+			return err
+		}
+		cfg.Components.Host.Methods = methods
+		cfg.Components.Host.WorkspaceHints = normalizeWorkspaceHints(cfg.Components.Host.WorkspaceHints)
 	} else {
 		cfg.Components.Host.Methods = nil
+		cfg.Components.Host.WorkspaceHints = nil
 	}
 	return nil
 }
@@ -375,4 +410,67 @@ func ValidateForRun(cfg Config) error {
 		return fmt.Errorf("unsupported logging.level: %s", cfg.Logging.Level)
 	}
 	return nil
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func normalizeHostMethods(values []string) ([]string, error) {
+	if len(values) == 0 {
+		return append([]string(nil), hostMethods...), nil
+	}
+	supported := make(map[string]bool, len(hostMethods))
+	for _, method := range hostMethods {
+		supported[method] = true
+	}
+	seen := map[string]bool{}
+	methods := make([]string, 0, len(values))
+	for _, value := range values {
+		method := strings.TrimSpace(value)
+		if method == "" {
+			continue
+		}
+		if !supported[method] {
+			return nil, fmt.Errorf("unsupported components.host.methods entry: %s", method)
+		}
+		if seen[method] {
+			continue
+		}
+		seen[method] = true
+		methods = append(methods, method)
+	}
+	if len(methods) == 0 {
+		return nil, fmt.Errorf("components.host.methods must include at least one supported method")
+	}
+	return methods, nil
+}
+
+func normalizeWorkspaceHints(values []WorkspaceHint) []WorkspaceHint {
+	hints := make([]WorkspaceHint, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		hint := WorkspaceHint{
+			Name:     strings.TrimSpace(value.Name),
+			RootPath: strings.TrimSpace(value.RootPath),
+		}
+		if hint.Name == "" && hint.RootPath == "" {
+			continue
+		}
+		key := hint.Name + "\x00" + hint.RootPath
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		hints = append(hints, hint)
+	}
+	return hints
 }

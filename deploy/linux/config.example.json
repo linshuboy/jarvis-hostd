@@ -7,7 +7,25 @@
   "heartbeat_seconds": 20,
   "components": {
     "host": {
-      "enabled": true
+      "enabled": true,
+      "methods": [
+        "host.fs.stat",
+        "host.fs.list",
+        "host.fs.read",
+        "host.fs.write",
+        "host.fs.mkdir",
+        "host.exec.run"
+      ],
+      "workspace_hints": [
+        {
+          "name": "Home",
+          "root_path": "/home/agi"
+        },
+        {
+          "name": "Workspace",
+          "root_path": "/workspace"
+        }
+      ]
     }
   },
   "logging": {

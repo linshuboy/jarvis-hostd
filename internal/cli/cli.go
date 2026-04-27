@@ -465,6 +465,8 @@ func defaultRunnerFactory(cfg config.Config, store *state.Store, logger *log.Log
 	hostComponent, err := host.NewComponent(host.Options{
 		ComponentID:        host.ComponentID,
 		RuntimeVersion:     buildinfo.RuntimeVersion(),
+		Methods:            append([]string(nil), cfg.Components.Host.Methods...),
+		WorkspaceHints:     hostWorkspaceHints(cfg.Components.Host.WorkspaceHints),
 		MaxReadBytes:       host.DefaultMaxReadBytes,
 		MaxOutputBytes:     host.DefaultMaxOutputBytes,
 		DefaultExecTimeout: host.DefaultExecTimeout,
@@ -479,6 +481,17 @@ func defaultRunnerFactory(cfg config.Config, store *state.Store, logger *log.Log
 		Dialer:        wsclient.DefaultDialer{},
 		Logger:        logger,
 	}), nil
+}
+
+func hostWorkspaceHints(values []config.WorkspaceHint) []host.WorkspaceHint {
+	hints := make([]host.WorkspaceHint, 0, len(values))
+	for _, value := range values {
+		hints = append(hints, host.WorkspaceHint{
+			Name:     value.Name,
+			RootPath: value.RootPath,
+		})
+	}
+	return hints
 }
 
 func printUsage(output io.Writer) {

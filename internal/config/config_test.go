@@ -71,6 +71,79 @@ func TestLoadPrecedence(t *testing.T) {
 	}
 }
 
+func TestLoadPreservesExplicitHostMethodsAndWorkspaceHints(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	content := `{
+	  "gateway": {
+	    "ws_url": "ws://file.example/ws/node",
+	    "tls_mode": "system"
+	  },
+	  "display_name": "file-name",
+	  "components": {
+	    "host": {
+	      "enabled": true,
+	      "methods": ["host.fs.read", "host.fs.list"],
+	      "workspace_hints": [
+	        {"name": "Repo", "root_path": "/workspace/repo"},
+	        {"name": "Home", "rootPath": "/home/agi"}
+	      ]
+	    }
+	  }
+	}`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := Load(Options{
+		ConfigPath: configPath,
+		StatePath:  filepath.Join(tempDir, "state.json"),
+	})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	methods := loaded.Config.Components.Host.Methods
+	if len(methods) != 2 || methods[0] != "host.fs.read" || methods[1] != "host.fs.list" {
+		t.Fatalf("unexpected host methods: %#v", methods)
+	}
+	hints := loaded.Config.Components.Host.WorkspaceHints
+	if len(hints) != 2 {
+		t.Fatalf("unexpected workspace hints: %#v", hints)
+	}
+	if hints[0].Name != "Repo" || hints[0].RootPath != "/workspace/repo" {
+		t.Fatalf("unexpected first workspace hint: %#v", hints[0])
+	}
+	if hints[1].Name != "Home" || hints[1].RootPath != "/home/agi" {
+		t.Fatalf("unexpected second workspace hint: %#v", hints[1])
+	}
+}
+
+func TestLoadRejectsUnsupportedHostMethod(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	content := `{
+	  "gateway": {
+	    "ws_url": "ws://file.example/ws/node",
+	    "tls_mode": "system"
+	  },
+	  "components": {
+	    "host": {
+	      "enabled": true,
+	      "methods": ["host.fs.read", "host.mobile.fake"]
+	    }
+	  }
+	}`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, err := Load(Options{
+		ConfigPath: configPath,
+		StatePath:  filepath.Join(tempDir, "state.json"),
+	})
+	if err == nil {
+		t.Fatalf("expected unsupported method error")
+	}
+}
+
 func TestValidateForRunRejectsMissingGatewayURL(t *testing.T) {
 	cfg := defaultConfig()
 	if err := ValidateForRun(cfg); err == nil {

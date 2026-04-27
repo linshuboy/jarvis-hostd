@@ -224,7 +224,14 @@ func TestRunOncePairingRequiredPersistsPendingState(t *testing.T) {
 }
 
 func TestBuildConnectRequestIncludesRuntimeAndHostComponent(t *testing.T) {
-	component, err := host.NewComponent(host.Options{ComponentID: host.ComponentID, RuntimeVersion: "0.1.0"})
+	component, err := host.NewComponent(host.Options{
+		ComponentID:    host.ComponentID,
+		RuntimeVersion: "0.1.0",
+		Methods:        []string{"host.fs.read", "host.fs.list"},
+		WorkspaceHints: []host.WorkspaceHint{
+			{Name: "Repo", RootPath: "/workspace/repo"},
+		},
+	})
 	if err != nil {
 		t.Fatalf("new component: %v", err)
 	}
@@ -262,6 +269,26 @@ func TestBuildConnectRequestIncludesRuntimeAndHostComponent(t *testing.T) {
 	}
 	if frame.Params.Components[0].ComponentID != host.ComponentID {
 		t.Fatalf("unexpected component id: %s", frame.Params.Components[0].ComponentID)
+	}
+	if len(frame.Params.Components[0].Methods) != 2 || frame.Params.Components[0].Methods[0] != "host.fs.read" {
+		t.Fatalf("unexpected component methods: %#v", frame.Params.Components[0].Methods)
+	}
+	hints, ok := frame.Params.Components[0].Metadata["workspace_hints"].([]map[string]string)
+	if !ok || len(hints) != 1 || hints[0]["root_path"] != "/workspace/repo" {
+		t.Fatalf("unexpected workspace hints: %#v", frame.Params.Components[0].Metadata["workspace_hints"])
+	}
+	heartbeat := runner.buildHeartbeat(state.State{RuntimeID: "runtime-1"}, map[string]bool{host.ComponentID: true})
+	payload, ok := heartbeat.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected heartbeat payload: %#v", heartbeat.Payload)
+	}
+	components, ok := payload["components"].([]protocol.RuntimeComponent)
+	if !ok || len(components) != 1 {
+		t.Fatalf("unexpected heartbeat components: %#v", payload["components"])
+	}
+	heartbeatHints, ok := components[0].Metadata["workspace_hints"].([]map[string]string)
+	if !ok || len(heartbeatHints) != 1 || heartbeatHints[0]["root_path"] != "/workspace/repo" {
+		t.Fatalf("unexpected heartbeat workspace hints: %#v", components[0].Metadata["workspace_hints"])
 	}
 }
 
