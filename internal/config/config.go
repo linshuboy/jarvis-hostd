@@ -19,6 +19,7 @@ var hostMethods = []string{
 	"host.fs.write",
 	"host.fs.mkdir",
 	"host.exec.run",
+	"host.update.apply",
 }
 
 var allowedLogLevels = map[string]bool{
@@ -38,11 +39,54 @@ type HostComponentConfig struct {
 	Enabled        bool            `json:"enabled"`
 	Methods        []string        `json:"methods"`
 	WorkspaceHints []WorkspaceHint `json:"workspace_hints,omitempty"`
+	Update         UpdateConfig    `json:"update,omitempty"`
+}
+
+type UpdateConfig struct {
+	Command        []string `json:"command,omitempty"`
+	Root           string   `json:"root,omitempty"`
+	Download       bool     `json:"download,omitempty"`
+	AuthToken      string   `json:"auth_token,omitempty"`
+	TimeoutSeconds int      `json:"timeout_seconds,omitempty"`
+	MaxOutputBytes int      `json:"max_output_bytes,omitempty"`
 }
 
 type WorkspaceHint struct {
 	Name     string `json:"name"`
 	RootPath string `json:"root_path"`
+}
+
+func (u *UpdateConfig) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Command             []string `json:"command"`
+		Root                string   `json:"root"`
+		Download            *bool    `json:"download"`
+		AuthToken           string   `json:"auth_token"`
+		AuthTokenCamel      string   `json:"authToken"`
+		TimeoutSeconds      int      `json:"timeout_seconds"`
+		TimeoutSecondsCamel int      `json:"timeoutSeconds"`
+		MaxOutputBytes      int      `json:"max_output_bytes"`
+		MaxOutputBytesCamel int      `json:"maxOutputBytes"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	u.Command = append([]string(nil), raw.Command...)
+	u.Root = strings.TrimSpace(raw.Root)
+	u.Download = raw.Download == nil || *raw.Download
+	u.AuthToken = strings.TrimSpace(raw.AuthToken)
+	if u.AuthToken == "" {
+		u.AuthToken = strings.TrimSpace(raw.AuthTokenCamel)
+	}
+	u.TimeoutSeconds = raw.TimeoutSeconds
+	if u.TimeoutSeconds <= 0 {
+		u.TimeoutSeconds = raw.TimeoutSecondsCamel
+	}
+	u.MaxOutputBytes = raw.MaxOutputBytes
+	if u.MaxOutputBytes <= 0 {
+		u.MaxOutputBytes = raw.MaxOutputBytesCamel
+	}
+	return nil
 }
 
 func (w *WorkspaceHint) UnmarshalJSON(data []byte) error {
@@ -282,6 +326,9 @@ func applyFile(path string, cfg *Config) error {
 		if len(fileCfg.Components.Host.WorkspaceHints) > 0 {
 			cfg.Components.Host.WorkspaceHints = append([]WorkspaceHint(nil), fileCfg.Components.Host.WorkspaceHints...)
 		}
+		if len(fileCfg.Components.Host.Update.Command) > 0 {
+			cfg.Components.Host.Update = fileCfg.Components.Host.Update
+		}
 	}
 	if fileCfg.Logging != nil && fileCfg.Logging.Level != "" {
 		cfg.Logging.Level = fileCfg.Logging.Level
@@ -321,6 +368,36 @@ func applyEnv(cfg *Config) error {
 	}
 	if raw := strings.TrimSpace(os.Getenv("HOSTD_COMPONENTS_HOST_METHODS")); raw != "" {
 		cfg.Components.Host.Methods = splitCSV(raw)
+	}
+	if raw := strings.TrimSpace(os.Getenv("HOSTD_UPDATE_COMMAND")); raw != "" {
+		cfg.Components.Host.Update.Command = splitCSV(raw)
+	}
+	if raw := strings.TrimSpace(os.Getenv("HOSTD_UPDATE_ROOT")); raw != "" {
+		cfg.Components.Host.Update.Root = raw
+	}
+	if raw := strings.TrimSpace(os.Getenv("HOSTD_UPDATE_DOWNLOAD")); raw != "" {
+		parsed, err := ParseBool(raw)
+		if err != nil {
+			return err
+		}
+		cfg.Components.Host.Update.Download = parsed
+	}
+	if raw := strings.TrimSpace(os.Getenv("HOSTD_UPDATE_AUTH_TOKEN")); raw != "" {
+		cfg.Components.Host.Update.AuthToken = raw
+	}
+	if raw := strings.TrimSpace(os.Getenv("HOSTD_UPDATE_TIMEOUT_SECONDS")); raw != "" {
+		parsed, err := ParseInt(raw)
+		if err != nil {
+			return err
+		}
+		cfg.Components.Host.Update.TimeoutSeconds = parsed
+	}
+	if raw := strings.TrimSpace(os.Getenv("HOSTD_UPDATE_MAX_OUTPUT_BYTES")); raw != "" {
+		parsed, err := ParseInt(raw)
+		if err != nil {
+			return err
+		}
+		cfg.Components.Host.Update.MaxOutputBytes = parsed
 	}
 	return nil
 }
@@ -379,9 +456,11 @@ func normalize(cfg *Config) error {
 		}
 		cfg.Components.Host.Methods = methods
 		cfg.Components.Host.WorkspaceHints = normalizeWorkspaceHints(cfg.Components.Host.WorkspaceHints)
+		cfg.Components.Host.Update = normalizeUpdateConfig(cfg.Components.Host.Update)
 	} else {
 		cfg.Components.Host.Methods = nil
 		cfg.Components.Host.WorkspaceHints = nil
+		cfg.Components.Host.Update = UpdateConfig{}
 	}
 	return nil
 }
@@ -422,6 +501,39 @@ func splitCSV(value string) []string {
 		}
 	}
 	return items
+}
+
+func normalizeUpdateConfig(value UpdateConfig) UpdateConfig {
+	command := make([]string, 0, len(value.Command))
+	for _, item := range value.Command {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			command = append(command, item)
+		}
+	}
+	if len(command) == 0 {
+		return UpdateConfig{}
+	}
+	root := strings.TrimSpace(value.Root)
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "hostd-updates")
+	}
+	timeoutSeconds := value.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 600
+	}
+	maxOutputBytes := value.MaxOutputBytes
+	if maxOutputBytes <= 0 {
+		maxOutputBytes = 32768
+	}
+	return UpdateConfig{
+		Command:        command,
+		Root:           root,
+		Download:       value.Download,
+		AuthToken:      strings.TrimSpace(value.AuthToken),
+		TimeoutSeconds: timeoutSeconds,
+		MaxOutputBytes: maxOutputBytes,
+	}
 }
 
 func normalizeHostMethods(values []string) ([]string, error) {

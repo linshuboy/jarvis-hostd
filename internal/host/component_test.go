@@ -1,9 +1,14 @@
 package host
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestComponentReadWriteAndMkdir(t *testing.T) {
@@ -130,5 +135,130 @@ func TestComponentDefinitionUsesDeclaredMethodsAndWorkspaceHints(t *testing.T) {
 	}
 	if rawHints[1]["name"] != "Home" || rawHints[1]["root_path"] != "/home/agi" {
 		t.Fatalf("unexpected second workspace hint: %#v", rawHints[1])
+	}
+}
+
+func TestComponentOnlyDeclaresUpdateWhenConfigured(t *testing.T) {
+	component, err := NewComponent(Options{ComponentID: ComponentID, RuntimeVersion: "0.1.0"})
+	if err != nil {
+		t.Fatalf("new component: %v", err)
+	}
+	for _, method := range component.Definition().Methods {
+		if method == HostUpdateMethod {
+			t.Fatalf("update method should not be declared without update command")
+		}
+	}
+
+	updateComponent, err := NewComponent(Options{
+		ComponentID:    ComponentID,
+		RuntimeVersion: "0.1.0",
+		Update: UpdateOptions{
+			Command: []string{"/bin/true"},
+			Root:    t.TempDir(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("new update component: %v", err)
+	}
+	found := false
+	for _, method := range updateComponent.Definition().Methods {
+		if method == HostUpdateMethod {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("update method should be declared when update command is configured")
+	}
+	if enabled := updateComponent.Definition().Metadata["update_enabled"]; enabled != true {
+		t.Fatalf("expected update metadata: %#v", updateComponent.Definition().Metadata)
+	}
+}
+
+func TestComponentApplyUpdateWritesManifestAndRunsCommand(t *testing.T) {
+	if os.Getenv("HOSTD_UPDATE_TEST_HELPER") == "1" {
+		os.Stdout.WriteString("tag=" + os.Getenv("AGI_UPDATE_RELEASE_TAG"))
+		return
+	}
+	root := t.TempDir()
+	t.Setenv("HOSTD_UPDATE_TEST_HELPER", "1")
+	helperCommand := []string{os.Args[0], "-test.run", "TestComponentApplyUpdateWritesManifestAndRunsCommand"}
+	component, err := NewComponent(Options{
+		ComponentID:    ComponentID,
+		RuntimeVersion: "0.1.0",
+		Update: UpdateOptions{
+			Command:        helperCommand,
+			Root:           root,
+			Download:       true,
+			TimeoutSeconds: 5 * time.Second,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new component: %v", err)
+	}
+	result, updateErr := component.Dispatch(HostUpdateMethod, map[string]any{
+		"componentId":      ComponentID,
+		"runtimeId":        "runtime-a",
+		"release_tag":      "v1.2.3",
+		"sourceRepository": "owner/repo",
+		"sourceSha":        "abc123",
+		"imageTags":        []any{"v1.2.3", "latest"},
+		"services":         []any{"gateway"},
+		"containerImages":  map[string]any{"gateway": "registry.example/gateway:v1.2.3"},
+	})
+	if updateErr != nil {
+		t.Fatalf("apply update: %v", updateErr)
+	}
+	if result["ok"] != true {
+		t.Fatalf("unexpected update result: %#v", result)
+	}
+	if !strings.Contains(stringValue(result["stdout"]), "tag=v1.2.3") {
+		t.Fatalf("unexpected stdout: %#v", result["stdout"])
+	}
+	manifestPath := result["manifestPath"].(string)
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+	if manifest["runtime_id"] != "runtime-a" || manifest["release_tag"] != "v1.2.3" {
+		t.Fatalf("unexpected manifest: %#v", manifest)
+	}
+}
+
+func TestComponentApplyUpdateRejectsPackageChecksumMismatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("package"))
+	}))
+	defer server.Close()
+
+	component, err := NewComponent(Options{
+		ComponentID:    ComponentID,
+		RuntimeVersion: "0.1.0",
+		Update: UpdateOptions{
+			Command:        []string{"/bin/true"},
+			Root:           t.TempDir(),
+			Download:       true,
+			TimeoutSeconds: 5 * time.Second,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new component: %v", err)
+	}
+	_, updateErr := component.Dispatch(HostUpdateMethod, map[string]any{
+		"componentId":     ComponentID,
+		"runtimeId":       "runtime-a",
+		"packageUrl":      server.URL + "/hostd.tar.gz",
+		"packageSha256":   "0000000000000000000000000000000000000000000000000000000000000000",
+		"releaseTag":      "v1.2.3",
+		"artifactBaseUrl": server.URL,
+	})
+	if updateErr == nil {
+		t.Fatalf("expected checksum mismatch")
+	}
+	if updateErr.Code != "UPDATE_PACKAGE_CHECKSUM_MISMATCH" {
+		t.Fatalf("unexpected error code: %s", updateErr.Code)
 	}
 }

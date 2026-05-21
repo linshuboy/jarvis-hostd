@@ -14,8 +14,15 @@
         "host.fs.read",
         "host.fs.write",
         "host.fs.mkdir",
-        "host.exec.run"
+        "host.exec.run",
+        "host.update.apply"
       ],
+      "update": {
+        "command": ["/bin/bash", "/workspace/scripts/apply_container_rollout.sh"],
+        "root": "/var/lib/hostd/updates",
+        "download": true,
+        "timeout_seconds": 1200
+      },
       "workspace_hints": [
         {
           "name": "Home",

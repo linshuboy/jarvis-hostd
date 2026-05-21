@@ -14,8 +14,15 @@
         "host.fs.read",
         "host.fs.write",
         "host.fs.mkdir",
-        "host.exec.run"
+        "host.exec.run",
+        "host.update.apply"
       ],
+      "update": {
+        "command": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", "C:\\workspace\\scripts\\apply_container_rollout.ps1"],
+        "root": "C:\\ProgramData\\hostd\\updates",
+        "download": true,
+        "timeout_seconds": 1200
+      },
       "workspace_hints": [
         {
           "name": "Profile",

@@ -97,6 +97,7 @@ func pairClaimInvite(args []string, stdout io.Writer, stderr io.Writer) error {
 		MaxReadBytes:       host.DefaultMaxReadBytes,
 		MaxOutputBytes:     host.DefaultMaxOutputBytes,
 		DefaultExecTimeout: host.DefaultExecTimeout,
+		Update:             hostUpdateOptions(loaded.Config.Components.Host.Update),
 	})
 	if err != nil {
 		return err

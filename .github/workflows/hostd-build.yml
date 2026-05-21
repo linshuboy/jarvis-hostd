@@ -1,4 +1,5 @@
 name: hostd-build
+run-name: hostd-build ${{ inputs.source_sha || github.sha }}
 
 on:
   push:

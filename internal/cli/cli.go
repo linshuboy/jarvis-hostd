@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"agi/runtime/hostd/internal/appctl"
 	"agi/runtime/hostd/internal/buildinfo"
@@ -470,6 +471,7 @@ func defaultRunnerFactory(cfg config.Config, store *state.Store, logger *log.Log
 		MaxReadBytes:       host.DefaultMaxReadBytes,
 		MaxOutputBytes:     host.DefaultMaxOutputBytes,
 		DefaultExecTimeout: host.DefaultExecTimeout,
+		Update:             hostUpdateOptions(cfg.Components.Host.Update),
 	})
 	if err != nil {
 		return nil, err
@@ -481,6 +483,17 @@ func defaultRunnerFactory(cfg config.Config, store *state.Store, logger *log.Log
 		Dialer:        wsclient.DefaultDialer{},
 		Logger:        logger,
 	}), nil
+}
+
+func hostUpdateOptions(value config.UpdateConfig) host.UpdateOptions {
+	return host.UpdateOptions{
+		Command:        append([]string(nil), value.Command...),
+		Root:           value.Root,
+		Download:       value.Download,
+		AuthToken:      value.AuthToken,
+		TimeoutSeconds: time.Duration(value.TimeoutSeconds) * time.Second,
+		MaxOutputBytes: value.MaxOutputBytes,
+	}
 }
 
 func hostWorkspaceHints(values []config.WorkspaceHint) []host.WorkspaceHint {
