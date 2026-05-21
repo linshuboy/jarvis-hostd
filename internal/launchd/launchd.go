@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	DefaultLabel   = "ai.jarvis.hostd"
+	DefaultLabel   = "ai.sunvisai.hostd"
 	ServiceManager = "launchd"
 )
 

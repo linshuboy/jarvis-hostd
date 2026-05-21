@@ -51,13 +51,13 @@ run_cmd() {
 DRY_RUN="0"
 INSTALL_ROOT="${HOSTD_INSTALL_ROOT:-}"
 BIN_SRC="./hostd"
-BIN_DST="${HOSTD_BIN_DST:-$HOME/Library/Application Support/JARVISAI/hostd/bin/hostd}"
+BIN_DST="${HOSTD_BIN_DST:-$HOME/Library/Application Support/Sunvisai/hostd/bin/hostd}"
 CONFIG_DST="${HOSTD_CONFIG_DST:-$HOME/Library/Application Support/hostd/config.json}"
 STATE_PATH="${HOSTD_STATE_PATH:-$HOME/Library/Application Support/hostd/state.json}"
-PLIST_DST="${HOSTD_PLIST_DST:-$HOME/Library/LaunchAgents/ai.jarvis.hostd.plist}"
+PLIST_DST="${HOSTD_PLIST_DST:-$HOME/Library/LaunchAgents/ai.sunvisai.hostd.plist}"
 STDOUT_LOG="${HOSTD_STDOUT_LOG:-$HOME/Library/Logs/hostd/stdout.log}"
 STDERR_LOG="${HOSTD_STDERR_LOG:-$HOME/Library/Logs/hostd/stderr.log}"
-LABEL="${HOSTD_LAUNCHD_LABEL:-ai.jarvis.hostd}"
+LABEL="${HOSTD_LAUNCHD_LABEL:-ai.sunvisai.hostd}"
 HOSTD_CMD="${HOSTD_CMD:-}"
 
 while [[ $# -gt 0 ]]; do

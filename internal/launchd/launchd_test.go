@@ -29,7 +29,7 @@ func (f *fakeCommandRunner) Run(ctx context.Context, name string, args ...string
 func TestRenderPlistIncludesRuntimeCommand(t *testing.T) {
 	plist, err := RenderPlist(InstallOptions{
 		Label:      DefaultLabel,
-		BinaryPath: "/Applications/JARVIS.app/Contents/MacOS/hostd",
+		BinaryPath: "/Applications/Sunvisai.app/Contents/MacOS/hostd",
 		ConfigPath: "/Users/dev/Library/Application Support/hostd/config.json",
 		StatePath:  "/Users/dev/Library/Application Support/hostd/state.json",
 		WorkingDir: "/Users/dev/Library/Application Support/hostd",
@@ -42,7 +42,7 @@ func TestRenderPlistIncludesRuntimeCommand(t *testing.T) {
 	for _, expected := range []string{
 		"<string>run</string>",
 		"<string>--config</string>",
-		"<string>/Applications/JARVIS.app/Contents/MacOS/hostd</string>",
+		"<string>/Applications/Sunvisai.app/Contents/MacOS/hostd</string>",
 		"<string>/Users/dev/Library/Application Support/hostd/config.json</string>",
 		"<string>/Users/dev/Library/Application Support/hostd/state.json</string>",
 		"<key>KeepAlive</key>",
@@ -82,7 +82,7 @@ func TestInstallWritesPlistAndBootstrapsLaunchAgent(t *testing.T) {
 	options := InstallOptions{
 		Label:      DefaultLabel,
 		PlistPath:  filepath.Join(tempDir, DefaultLabel+".plist"),
-		BinaryPath: "/Applications/JARVIS.app/Contents/MacOS/hostd",
+		BinaryPath: "/Applications/Sunvisai.app/Contents/MacOS/hostd",
 		ConfigPath: filepath.Join(tempDir, "config.json"),
 		StatePath:  filepath.Join(tempDir, "state.json"),
 		WorkingDir: tempDir,
@@ -91,7 +91,7 @@ func TestInstallWritesPlistAndBootstrapsLaunchAgent(t *testing.T) {
 	}
 	runner := &fakeCommandRunner{
 		stdout: map[string]string{
-			"launchctl print gui/501/ai.jarvis.hostd": "pid = 4242\n",
+			"launchctl print gui/501/ai.sunvisai.hostd": "pid = 4242\n",
 		},
 		stderr:   map[string]string{},
 		failures: map[string]error{},
@@ -134,7 +134,7 @@ func TestUninstallRemovesPlist(t *testing.T) {
 	runner := &fakeCommandRunner{
 		stdout:   map[string]string{},
 		stderr:   map[string]string{},
-		failures: map[string]error{"launchctl print gui/501/ai.jarvis.hostd": context.Canceled},
+		failures: map[string]error{"launchctl print gui/501/ai.sunvisai.hostd": context.Canceled},
 	}
 
 	status, err := Uninstall(context.Background(), DefaultLabel, plistPath, runner)

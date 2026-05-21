@@ -29,11 +29,11 @@ def test_hostd_linux_install_script_supports_dry_run_and_staging_root(tmp_path: 
             "--bin-src",
             str(binary_path),
             "--bin-dst",
-            "/opt/jarvis/bin/hostd",
+            "/opt/sunvisai/bin/hostd",
             "--config-dst",
-            "/opt/jarvis/etc/config.json",
+            "/opt/sunvisai/etc/config.json",
             "--state-path",
-            "/opt/jarvis/var/state.json",
+            "/opt/sunvisai/var/state.json",
         ],
         cwd=REPO_ROOT,
         check=True,
@@ -43,7 +43,7 @@ def test_hostd_linux_install_script_supports_dry_run_and_staging_root(tmp_path: 
     output = result.stdout
     assert "install -Dm0755" in output
     assert "render" in output
-    assert "/opt/jarvis/bin/hostd" in output
+    assert "/opt/sunvisai/bin/hostd" in output
     assert "systemctl enable --now hostd.service" in output
     assert not stage_root.exists()
 
@@ -75,7 +75,7 @@ printf '%s\\n' "$0 $*" >> "${HOSTD_FAKE_LOG}"
             "--bin-src",
             str(binary_path),
             "--bin-dst",
-            "/opt/jarvis/bin/hostd",
+            "/opt/sunvisai/bin/hostd",
             "--unit-dst",
             "/etc/systemd/system/custom-hostd.service",
             "--sysusers-dst",
@@ -83,9 +83,9 @@ printf '%s\\n' "$0 $*" >> "${HOSTD_FAKE_LOG}"
             "--tmpfiles-dst",
             "/usr/lib/tmpfiles.d/custom-hostd.conf",
             "--config-dst",
-            "/opt/jarvis/etc/config.json",
+            "/opt/sunvisai/etc/config.json",
             "--state-path",
-            "/opt/jarvis/var/state.json",
+            "/opt/sunvisai/var/state.json",
         ],
         cwd=REPO_ROOT,
         env=env,
@@ -94,11 +94,11 @@ printf '%s\\n' "$0 $*" >> "${HOSTD_FAKE_LOG}"
         text=True,
     )
     assert result.stdout == ""
-    installed_binary = stage_root / "opt" / "jarvis" / "bin" / "hostd"
+    installed_binary = stage_root / "opt" / "sunvisai" / "bin" / "hostd"
     installed_unit = stage_root / "etc" / "systemd" / "system" / "custom-hostd.service"
     installed_sysusers = stage_root / "usr" / "lib" / "sysusers.d" / "custom-hostd.conf"
     installed_tmpfiles = stage_root / "usr" / "lib" / "tmpfiles.d" / "custom-hostd.conf"
-    installed_config = stage_root / "opt" / "jarvis" / "etc" / "config.json"
+    installed_config = stage_root / "opt" / "sunvisai" / "etc" / "config.json"
     assert installed_binary.exists()
     assert installed_unit.exists()
     assert installed_sysusers.exists()
@@ -106,15 +106,15 @@ printf '%s\\n' "$0 $*" >> "${HOSTD_FAKE_LOG}"
     assert installed_config.exists()
     unit_text = installed_unit.read_text(encoding="utf-8")
     assert "__HOSTD_" not in unit_text
-    assert "WorkingDirectory=/opt/jarvis/var" in unit_text
-    assert "ExecStartPre=/opt/jarvis/bin/hostd config validate --config /opt/jarvis/etc/config.json --state /opt/jarvis/var/state.json" in unit_text
-    assert "ExecStart=/opt/jarvis/bin/hostd run --config /opt/jarvis/etc/config.json --state /opt/jarvis/var/state.json" in unit_text
-    assert "ReadWritePaths=/opt/jarvis/var" in unit_text
-    assert "ReadOnlyPaths=/opt/jarvis/etc" in unit_text
+    assert "WorkingDirectory=/opt/sunvisai/var" in unit_text
+    assert "ExecStartPre=/opt/sunvisai/bin/hostd config validate --config /opt/sunvisai/etc/config.json --state /opt/sunvisai/var/state.json" in unit_text
+    assert "ExecStart=/opt/sunvisai/bin/hostd run --config /opt/sunvisai/etc/config.json --state /opt/sunvisai/var/state.json" in unit_text
+    assert "ReadWritePaths=/opt/sunvisai/var" in unit_text
+    assert "ReadOnlyPaths=/opt/sunvisai/etc" in unit_text
     tmpfiles_text = installed_tmpfiles.read_text(encoding="utf-8")
     assert "__HOSTD_" not in tmpfiles_text
-    assert "d /opt/jarvis/etc 0755 root root -" in tmpfiles_text
-    assert "d /opt/jarvis/var 0755 hostd hostd -" in tmpfiles_text
+    assert "d /opt/sunvisai/etc 0755 root root -" in tmpfiles_text
+    assert "d /opt/sunvisai/var 0755 hostd hostd -" in tmpfiles_text
     logged = command_log.read_text(encoding="utf-8")
     assert str(stage_root / "usr" / "lib" / "sysusers.d" / "custom-hostd.conf") in logged
     assert f"{fake_bin_dir / 'systemd-tmpfiles'} --create {stage_root / 'usr' / 'lib' / 'tmpfiles.d' / 'custom-hostd.conf'}" in logged
@@ -140,8 +140,8 @@ printf '%s\\n' "$0 $*" >> "${HOSTD_FAKE_LOG}"
     _write_executable(fake_bin_dir / "systemd-tmpfiles", fake_script)
     _write_executable(fake_bin_dir / "systemctl", fake_script)
     stage_root = tmp_path / "stage"
-    config_path = stage_root / "opt" / "jarvis" / "etc" / "config.json"
-    installed_binary = stage_root / "opt" / "jarvis" / "bin" / "hostd"
+    config_path = stage_root / "opt" / "sunvisai" / "etc" / "config.json"
+    installed_binary = stage_root / "opt" / "sunvisai" / "bin" / "hostd"
     installed_binary.parent.mkdir(parents=True, exist_ok=True)
     installed_binary.write_text(old_binary.read_text(encoding="utf-8"), encoding="utf-8")
     installed_binary.chmod(0o755)
@@ -159,11 +159,11 @@ printf '%s\\n' "$0 $*" >> "${HOSTD_FAKE_LOG}"
             "--bin-src",
             str(new_binary),
             "--bin-dst",
-            "/opt/jarvis/bin/hostd",
+            "/opt/sunvisai/bin/hostd",
             "--config-dst",
-            "/opt/jarvis/etc/config.json",
+            "/opt/sunvisai/etc/config.json",
             "--state-path",
-            "/opt/jarvis/var/state.json",
+            "/opt/sunvisai/var/state.json",
         ],
         cwd=REPO_ROOT,
         env=env,

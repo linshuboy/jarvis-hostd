@@ -1,5 +1,5 @@
 [Unit]
-Description=JARVISAI host runtime daemon
+Description=Sunvisai host runtime daemon
 After=network-online.target
 Wants=network-online.target
 

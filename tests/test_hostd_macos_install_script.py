@@ -29,13 +29,13 @@ def test_hostd_macos_install_script_supports_dry_run_and_staging_root(tmp_path: 
             "--bin-src",
             str(binary_path),
             "--bin-dst",
-            "/Applications/JARVIS/hostd",
+            "/Applications/Sunvisai/hostd",
             "--config-dst",
             "/Users/test/Library/Application Support/hostd/config.json",
             "--state-path",
             "/Users/test/Library/Application Support/hostd/state.json",
             "--plist-dst",
-            "/Users/test/Library/LaunchAgents/ai.jarvis.hostd.plist",
+            "/Users/test/Library/LaunchAgents/ai.sunvisai.hostd.plist",
         ],
         cwd=REPO_ROOT,
         check=True,
@@ -45,7 +45,7 @@ def test_hostd_macos_install_script_supports_dry_run_and_staging_root(tmp_path: 
     output = result.stdout
     assert "install -Dm0755" in output
     assert "service install-launchd" in output
-    assert "/Applications/JARVIS/hostd" in output
+    assert "/Applications/Sunvisai/hostd" in output
     assert not stage_root.exists()
 
 
@@ -74,13 +74,13 @@ printf '%s\\n' "$0 $*" >> "${HOSTD_FAKE_LOG}"
             "--bin-src",
             str(binary_path),
             "--bin-dst",
-            "/Applications/JARVIS/hostd",
+            "/Applications/Sunvisai/hostd",
             "--config-dst",
             "/Users/test/Library/Application Support/hostd/config.json",
             "--state-path",
             "/Users/test/Library/Application Support/hostd/state.json",
             "--plist-dst",
-            "/Users/test/Library/LaunchAgents/ai.jarvis.hostd.plist",
+            "/Users/test/Library/LaunchAgents/ai.sunvisai.hostd.plist",
             "--hostd-cmd",
             str(fake_hostd),
         ],
@@ -90,14 +90,14 @@ printf '%s\\n' "$0 $*" >> "${HOSTD_FAKE_LOG}"
         capture_output=True,
         text=True,
     )
-    installed_binary = stage_root / "Applications" / "JARVIS" / "hostd"
+    installed_binary = stage_root / "Applications" / "Sunvisai" / "hostd"
     installed_config = stage_root / "Users" / "test" / "Library" / "Application Support" / "hostd" / "config.json"
     assert installed_binary.exists()
     assert installed_binary.read_text(encoding="utf-8") == "binary-v1\n"
     assert installed_config.exists()
     logged = command_log.read_text(encoding="utf-8")
     assert "service install-launchd" in logged
-    assert "--bin /Applications/JARVIS/hostd" in logged
+    assert "--bin /Applications/Sunvisai/hostd" in logged
     assert "--config /Users/test/Library/Application Support/hostd/config.json" in logged
     assert "--state /Users/test/Library/Application Support/hostd/state.json" in logged
-    assert "--plist /Users/test/Library/LaunchAgents/ai.jarvis.hostd.plist" in logged
+    assert "--plist /Users/test/Library/LaunchAgents/ai.sunvisai.hostd.plist" in logged

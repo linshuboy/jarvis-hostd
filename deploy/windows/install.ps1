@@ -1,9 +1,9 @@
 param(
   [string]$BinSrc = ".\hostd.exe",
-  [string]$InstallRoot = "$env:ProgramFiles\JARVISAI\hostd",
+  [string]$InstallRoot = "$env:ProgramFiles\Sunvisai\hostd",
   [string]$ConfigDst = "$env:ProgramData\hostd\config.json",
   [string]$StatePath = "$env:ProgramData\hostd\state.json",
-  [string]$ServiceName = "JARVISAIHostd",
+  [string]$ServiceName = "SunvisaiHostd",
   [switch]$DryRun
 )
 
@@ -52,7 +52,7 @@ Invoke-Step "Create or update Windows Service $ServiceName" {
   } else {
     & sc.exe config $ServiceName binPath= $ServiceCommand start= auto | Out-Null
   }
-  & sc.exe description $ServiceName "JARVISAI host runtime daemon" | Out-Null
+  & sc.exe description $ServiceName "Sunvisai host runtime daemon" | Out-Null
   & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/15000/restart/30000 | Out-Null
 }
 
