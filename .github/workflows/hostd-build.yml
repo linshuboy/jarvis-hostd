@@ -1,5 +1,5 @@
 name: hostd-build
-run-name: hostd-build ${{ inputs.source_sha || github.sha }}
+run-name: hostd-build ${{ inputs.source_sha || github.sha }} ${{ inputs.release_request_id }}
 
 on:
   push:
@@ -28,6 +28,10 @@ on:
         type: string
       source_sha:
         description: 'Main repository source SHA for traceability'
+        required: false
+        type: string
+      release_request_id:
+        description: 'Main release workflow request identifier'
         required: false
         type: string
 
