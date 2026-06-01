@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -104,7 +105,66 @@ func (s *Store) saveUnlocked(current State) error {
 		return err
 	}
 	payload = append(payload, '\n')
-	return os.WriteFile(s.path, payload, 0o600)
+	return writeFileAtomic(s.path, payload, 0o600)
+}
+
+func writeFileAtomic(path string, payload []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tempFile, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp.")
+	if err != nil {
+		return err
+	}
+	tempPath := tempFile.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if err := tempFile.Chmod(perm); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if _, err := tempFile.Write(payload); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+	if err := replaceFile(tempPath, path); err != nil {
+		return err
+	}
+	cleanup = false
+	return syncDir(dir)
+}
+
+func replaceFile(source string, target string) error {
+	if err := os.Rename(source, target); err == nil {
+		return nil
+	} else if runtime.GOOS != "windows" {
+		return err
+	}
+	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(source, target)
+}
+
+func syncDir(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 func normalizeState(current State) State {
