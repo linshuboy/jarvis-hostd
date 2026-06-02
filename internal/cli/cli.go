@@ -59,6 +59,8 @@ func Execute(ctx context.Context, args []string, deps Dependencies) error {
 		return configCommand(args[1:], stdout, stderr)
 	case "service":
 		return serviceCommand(ctx, args[1:], deps)
+	case "update":
+		return updateCommand(ctx, args[1:], stdout, stderr)
 	case "version":
 		return versionCommand(stdout)
 	case "pair":
@@ -519,6 +521,9 @@ func printUsage(output io.Writer) {
 	_, _ = fmt.Fprintln(output, "hostd service install-launchd [--config PATH] [--state PATH] [--bin PATH] [--label NAME] [--plist PATH]")
 	_, _ = fmt.Fprintln(output, "hostd service uninstall-launchd [--config PATH] [--state PATH] [--label NAME] [--plist PATH]")
 	_, _ = fmt.Fprintln(output, "hostd service run [flags]")
+	_, _ = fmt.Fprintln(output, "hostd update check [--manifest-url URL]")
+	_, _ = fmt.Fprintln(output, "hostd update download [--manifest-url URL] [--output-dir DIR]")
+	_, _ = fmt.Fprintln(output, "hostd update apply [--manifest-url URL] [flags]")
 	_, _ = fmt.Fprintln(output, "hostd version")
 	_, _ = fmt.Fprintln(output, "hostd pair status [--config PATH] [--state PATH]")
 	_, _ = fmt.Fprintln(output, "hostd pair claim-invite --invite-url URL [--config PATH] [--state PATH] [--control-socket PATH]")
