@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -89,11 +90,17 @@ func (s *Store) loadUnlocked() (State, error) {
 		}
 		return State{}, err
 	}
-	var current State
-	if err := json.Unmarshal(content, &current); err != nil {
+	current, needsRepair, err := decodeState(content)
+	if err != nil {
 		return State{}, err
 	}
-	return normalizeState(current), nil
+	current = normalizeState(current)
+	if needsRepair {
+		if err := s.saveUnlocked(current); err != nil {
+			return State{}, err
+		}
+	}
+	return current, nil
 }
 
 func (s *Store) saveUnlocked(current State) error {
@@ -141,6 +148,16 @@ func writeFileAtomic(path string, payload []byte, perm os.FileMode) error {
 	}
 	cleanup = false
 	return syncDir(dir)
+}
+
+func decodeState(content []byte) (State, bool, error) {
+	var current State
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	if err := decoder.Decode(&current); err != nil {
+		return State{}, false, err
+	}
+	trailing := strings.TrimSpace(string(content[decoder.InputOffset():]))
+	return current, trailing != "", nil
 }
 
 func replaceFile(source string, target string) error {
