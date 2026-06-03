@@ -72,26 +72,36 @@ func updateCheck(ctx context.Context, args []string, stdout io.Writer, stderr io
 	flags := flag.NewFlagSet("update check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	manifestURL := flags.String("manifest-url", defaultReleaseManifestURL, "release manifest url")
+	proxyURL := flags.String("proxy-url", "", "HTTP(S) proxy url or url template containing {url} for release downloads")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	normalizedManifestURL, manifest, err := fetchReleaseManifest(ctx, *manifestURL)
+	normalizedProxyURL, err := normalizeUpdateProxyURL(*proxyURL)
+	if err != nil {
+		return err
+	}
+	normalizedManifestURL, manifest, err := fetchReleaseManifest(ctx, *manifestURL, normalizedProxyURL)
 	if err != nil {
 		return err
 	}
 	asset := selectHostdReleaseAsset(manifest)
-	return printJSON(stdout, updateCheckPayload(normalizedManifestURL, manifest, asset))
+	return printJSON(stdout, updateCheckPayload(normalizedManifestURL, normalizedProxyURL, manifest, asset))
 }
 
 func updateDownload(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("update download", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	manifestURL := flags.String("manifest-url", defaultReleaseManifestURL, "release manifest url")
+	proxyURL := flags.String("proxy-url", "", "HTTP(S) proxy url or url template containing {url} for release downloads")
 	outputDir := flags.String("output-dir", "", "directory to download the hostd package into")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	normalizedManifestURL, manifest, err := fetchReleaseManifest(ctx, *manifestURL)
+	normalizedProxyURL, err := normalizeUpdateProxyURL(*proxyURL)
+	if err != nil {
+		return err
+	}
+	normalizedManifestURL, manifest, err := fetchReleaseManifest(ctx, *manifestURL, normalizedProxyURL)
 	if err != nil {
 		return err
 	}
@@ -106,12 +116,13 @@ func updateDownload(ctx context.Context, args []string, stdout io.Writer, stderr
 			return err
 		}
 	}
-	packagePath, verified, err := downloadAsset(ctx, *asset, targetDir)
+	packagePath, verified, err := downloadAsset(ctx, *asset, targetDir, normalizedProxyURL)
 	if err != nil {
 		return err
 	}
 	return printJSON(stdout, map[string]any{
 		"manifest_url":      normalizedManifestURL,
+		"proxy_url":         emptyStringNil(normalizedProxyURL),
 		"release_version":   manifest.Release.Version,
 		"asset":             asset,
 		"download_path":     packagePath,
@@ -128,11 +139,16 @@ func updateApply(ctx context.Context, args []string, stdout io.Writer, stderr io
 	flags := flag.NewFlagSet("update apply", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	manifestURL := flags.String("manifest-url", defaultReleaseManifestURL, "release manifest url")
+	proxyURL := flags.String("proxy-url", "", "HTTP(S) proxy url or url template containing {url} for release downloads")
 	options, err := parseRunOptions(flags, args)
 	if err != nil {
 		return err
 	}
-	normalizedManifestURL, manifest, err := fetchReleaseManifest(ctx, *manifestURL)
+	normalizedProxyURL, err := normalizeUpdateProxyURL(*proxyURL)
+	if err != nil {
+		return err
+	}
+	normalizedManifestURL, manifest, err := fetchReleaseManifest(ctx, *manifestURL, normalizedProxyURL)
 	if err != nil {
 		return err
 	}
@@ -161,16 +177,19 @@ func updateApply(ctx context.Context, args []string, stdout io.Writer, stderr io
 	if err != nil {
 		return err
 	}
+	restoreProxyEnv := applyUpdateProxyEnv(normalizedProxyURL)
+	defer restoreProxyEnv()
 	result, updateErr := component.Dispatch(host.HostUpdateMethod, map[string]any{
 		"componentId":        host.ComponentID,
 		"runtime_id":         "",
 		"release_tag":        manifest.Release.Version,
 		"source_repository":  manifest.Release.SourceRepository,
 		"source_sha":         manifest.Release.SourceSHA,
-		"package_url":        asset.URL,
+		"package_url":        updateFetchURL(asset.URL, normalizedProxyURL),
 		"package_sha256":     asset.SHA256,
-		"artifact_base_url":  artifactBaseURL(asset.URL),
+		"artifact_base_url":  artifactBaseURL(updateFetchURL(asset.URL, normalizedProxyURL)),
 		"release_manifest":   normalizedManifestURL,
+		"release_proxy_url":  normalizedProxyURL,
 		"release_created_at": manifest.Release.CreatedAt,
 		"asset":              asset,
 	})
@@ -180,9 +199,10 @@ func updateApply(ctx context.Context, args []string, stdout io.Writer, stderr io
 	return printJSON(stdout, result)
 }
 
-func updateCheckPayload(manifestURL string, manifest releaseManifest, asset *releaseAsset) map[string]any {
+func updateCheckPayload(manifestURL string, proxyURL string, manifest releaseManifest, asset *releaseAsset) map[string]any {
 	return map[string]any{
 		"manifest_url":      manifestURL,
+		"proxy_url":         emptyStringNil(proxyURL),
 		"current_version":   buildinfo.RuntimeVersion(),
 		"latest_version":    manifest.Release.Version,
 		"update_available":  manifest.Release.Version != "" && manifest.Release.Version != buildinfo.RuntimeVersion(),
@@ -209,17 +229,106 @@ func normalizeManifestURL(value string) (string, error) {
 	return parsed.String(), nil
 }
 
-func fetchReleaseManifest(ctx context.Context, manifestURL string) (string, releaseManifest, error) {
+func normalizeUpdateProxyURL(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil
+	}
+	if strings.Contains(trimmed, "{url}") {
+		sample := strings.ReplaceAll(trimmed, "{url}", "https%3A%2F%2Fexample.com%2Ffile")
+		parsed, err := url.Parse(sample)
+		if err != nil {
+			return "", fmt.Errorf("invalid update proxy url template %q: %w", trimmed, err)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return "", fmt.Errorf("update proxy url template scheme must be http or https, got %s", parsed.Scheme)
+		}
+		return trimmed, nil
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("invalid update proxy url %q: %w", trimmed, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("update proxy url scheme must be http or https, got %s", parsed.Scheme)
+	}
+	return parsed.String(), nil
+}
+
+func updateFetchURL(targetURL string, proxyURL string) string {
+	trimmedProxy := strings.TrimSpace(proxyURL)
+	if trimmedProxy == "" {
+		return strings.TrimSpace(targetURL)
+	}
+	if strings.Contains(trimmedProxy, "{url}") {
+		return strings.ReplaceAll(trimmedProxy, "{url}", url.QueryEscape(strings.TrimSpace(targetURL)))
+	}
+	return strings.TrimSpace(targetURL)
+}
+
+func updateHTTPClient(proxyURL string) (*http.Client, error) {
+	trimmedProxy := strings.TrimSpace(proxyURL)
+	if trimmedProxy == "" || strings.Contains(trimmedProxy, "{url}") {
+		return http.DefaultClient, nil
+	}
+	parsed, err := url.Parse(trimmedProxy)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(parsed),
+		},
+	}, nil
+}
+
+func applyUpdateProxyEnv(proxyURL string) func() {
+	trimmedProxy := strings.TrimSpace(proxyURL)
+	if trimmedProxy == "" || strings.Contains(trimmedProxy, "{url}") {
+		return func() {}
+	}
+	previousHTTP, hadHTTP := os.LookupEnv("HTTP_PROXY")
+	previousHTTPS, hadHTTPS := os.LookupEnv("HTTPS_PROXY")
+	_ = os.Setenv("HTTP_PROXY", trimmedProxy)
+	_ = os.Setenv("HTTPS_PROXY", trimmedProxy)
+	return func() {
+		if hadHTTP {
+			_ = os.Setenv("HTTP_PROXY", previousHTTP)
+		} else {
+			_ = os.Unsetenv("HTTP_PROXY")
+		}
+		if hadHTTPS {
+			_ = os.Setenv("HTTPS_PROXY", previousHTTPS)
+		} else {
+			_ = os.Unsetenv("HTTPS_PROXY")
+		}
+	}
+}
+
+func emptyStringNil(value string) any {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return trimmed
+}
+
+func fetchReleaseManifest(ctx context.Context, manifestURL string, proxyURL string) (string, releaseManifest, error) {
 	normalized, err := normalizeManifestURL(manifestURL)
 	if err != nil {
 		return "", releaseManifest{}, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, normalized, nil)
+	requestURL := updateFetchURL(normalized, proxyURL)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return "", releaseManifest{}, err
 	}
 	request.Header.Set("Accept", "application/json")
-	response, err := http.DefaultClient.Do(request)
+	client, err := updateHTTPClient(proxyURL)
+	if err != nil {
+		return "", releaseManifest{}, err
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return "", releaseManifest{}, err
 	}
@@ -304,8 +413,9 @@ func uniqueDownloadPath(directory string, name string) string {
 	return filepath.Join(directory, fmt.Sprintf("%s-%d", safeName, os.Getpid()))
 }
 
-func downloadAsset(ctx context.Context, asset releaseAsset, directory string) (string, bool, error) {
-	parsed, err := url.Parse(strings.TrimSpace(asset.URL))
+func downloadAsset(ctx context.Context, asset releaseAsset, directory string, proxyURL string) (string, bool, error) {
+	requestURL := updateFetchURL(asset.URL, proxyURL)
+	parsed, err := url.Parse(strings.TrimSpace(requestURL))
 	if err != nil {
 		return "", false, fmt.Errorf("invalid release asset url %q: %w", asset.URL, err)
 	}
@@ -320,7 +430,11 @@ func downloadAsset(ctx context.Context, asset releaseAsset, directory string) (s
 	if err != nil {
 		return "", false, err
 	}
-	response, err := http.DefaultClient.Do(request)
+	client, err := updateHTTPClient(proxyURL)
+	if err != nil {
+		return "", false, err
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return "", false, err
 	}
