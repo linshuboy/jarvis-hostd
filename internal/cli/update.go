@@ -22,7 +22,7 @@ import (
 	"agi/runtime/hostd/internal/host"
 )
 
-const defaultReleaseManifestURL = "https://github.com/linshuboy/JARVISAI/releases/latest/download/release-manifest.json"
+const defaultReleaseManifestURL = "https://github.com/linshuboy/jarvisai-releases/releases/latest/download/release-manifest.json"
 
 type releaseManifest struct {
 	Release releaseInfo    `json:"release"`
