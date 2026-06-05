@@ -8,10 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -74,20 +71,9 @@ func Start(ctx context.Context, options ServerOptions) (*Server, error) {
 	if options.Shutdown == nil {
 		return nil, fmt.Errorf("app control shutdown handler is required")
 	}
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
-		return nil, err
-	}
-	if err := removeSocketIfPresent(socketPath); err != nil {
-		return nil, err
-	}
-	listener, err := net.Listen("unix", socketPath)
+	listener, err := listenControlSocket(socketPath)
 	if err != nil {
 		return nil, err
-	}
-	if chmodErr := os.Chmod(socketPath, 0o600); chmodErr != nil {
-		_ = listener.Close()
-		_ = os.Remove(socketPath)
-		return nil, chmodErr
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(snapshotPath, func(writer http.ResponseWriter, request *http.Request) {
@@ -186,7 +172,7 @@ func (s *Server) Close() error {
 		_ = s.listener.Close()
 	}
 	if s.socketPath != "" {
-		_ = os.Remove(s.socketPath)
+		_ = cleanupControlSocket(s.socketPath)
 	}
 	return nil
 }
@@ -220,8 +206,7 @@ func doJSONRequest[T any](socketPath string, method string, route string, body a
 		Timeout: httpClientTimout,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network string, address string) (net.Conn, error) {
-				var dialer net.Dialer
-				return dialer.DialContext(ctx, "unix", socketPath)
+				return dialControlSocket(ctx, socketPath)
 			},
 		},
 	}
@@ -267,14 +252,8 @@ func normalizeUnavailable(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, os.ErrNotExist) {
+	if isUnavailableError(err) {
 		return ErrUnavailable
-	}
-	var pathError *os.PathError
-	if errors.As(err, &pathError) {
-		if errors.Is(pathError.Err, syscall.ENOENT) || errors.Is(pathError.Err, syscall.ECONNREFUSED) || errors.Is(pathError.Err, syscall.EPERM) || errors.Is(pathError.Err, syscall.EACCES) {
-			return ErrUnavailable
-		}
 	}
 	if strings.Contains(strings.ToLower(err.Error()), "connect: no such file or directory") {
 		return ErrUnavailable
@@ -293,18 +272,4 @@ func writeJSON(writer http.ResponseWriter, value any) {
 func writeError(writer http.ResponseWriter, statusCode int, message string) {
 	writer.WriteHeader(statusCode)
 	writeJSON(writer, map[string]string{"error": message})
-}
-
-func removeSocketIfPresent(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	if info.Mode()&os.ModeSocket == 0 {
-		return fmt.Errorf("app control path exists and is not a socket: %s", path)
-	}
-	return os.Remove(path)
 }
