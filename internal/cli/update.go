@@ -52,6 +52,16 @@ type releaseAsset struct {
 	Size      int64  `json:"size"`
 }
 
+func comparableReleaseVersion(value string) string {
+	return strings.TrimLeft(strings.TrimSpace(value), "vV")
+}
+
+func releaseUpdateAvailable(latestVersion string, currentVersion string) bool {
+	latest := comparableReleaseVersion(latestVersion)
+	current := comparableReleaseVersion(currentVersion)
+	return latest != "" && latest != current
+}
+
 func updateCommand(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 {
 		return fmt.Errorf("update subcommand is required")
@@ -129,7 +139,7 @@ func updateDownload(ctx context.Context, args []string, stdout io.Writer, stderr
 		"sha256_verified":   verified,
 		"downloaded_at":     time.Now().UTC().Format(time.RFC3339),
 		"current_version":   buildinfo.RuntimeVersion(),
-		"update_available":  manifest.Release.Version != "" && manifest.Release.Version != buildinfo.RuntimeVersion(),
+		"update_available":  releaseUpdateAvailable(manifest.Release.Version, buildinfo.RuntimeVersion()),
 		"one_click_capable": false,
 		"one_click_note":    "download only; use hostd update apply when a local host update command is configured",
 	})
@@ -205,7 +215,7 @@ func updateCheckPayload(manifestURL string, proxyURL string, manifest releaseMan
 		"proxy_url":         emptyStringNil(proxyURL),
 		"current_version":   buildinfo.RuntimeVersion(),
 		"latest_version":    manifest.Release.Version,
-		"update_available":  manifest.Release.Version != "" && manifest.Release.Version != buildinfo.RuntimeVersion(),
+		"update_available":  releaseUpdateAvailable(manifest.Release.Version, buildinfo.RuntimeVersion()),
 		"checked_at":        time.Now().UTC().Format(time.RFC3339),
 		"asset":             asset,
 		"all_assets":        manifest.Clients.Hostd,
