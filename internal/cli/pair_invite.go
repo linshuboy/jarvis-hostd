@@ -27,6 +27,12 @@ type inviteClaimResponse struct {
 	RuntimeToken string `json:"runtime_token"`
 }
 
+type serviceOrigin struct {
+	scheme string
+	host   string
+	port   string
+}
+
 func pairClaimInvite(args []string, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("pair claim-invite", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -80,11 +86,7 @@ func pairClaimInvite(args []string, stdout io.Writer, stderr io.Writer) error {
 	store := state.NewStore(statePath)
 	current, err := store.Update(func(value *state.State) error {
 		_, ensureErr := state.EnsureRuntimeID(value)
-		if ensureErr != nil {
-			return ensureErr
-		}
-		value.LastGatewayURL = gatewayWSURL
-		return nil
+		return ensureErr
 	})
 	if err != nil {
 		return err
@@ -116,10 +118,15 @@ func pairClaimInvite(args []string, stdout io.Writer, stderr io.Writer) error {
 			"arch": runtime.GOARCH,
 		},
 	}
-	response, err := claimInvite(claimURL, map[string]any{
+	claimPayload := map[string]any{
 		"runtime":    runtimePayload,
 		"components": components,
-	})
+	}
+	currentRuntimeToken := strings.TrimSpace(current.RuntimeToken)
+	if currentRuntimeToken != "" && sameServiceOrigin(current.LastGatewayURL, claimURL) {
+		claimPayload["current_runtime_token"] = currentRuntimeToken
+	}
+	response, err := claimInvite(claimURL, claimPayload)
 	if err != nil {
 		return err
 	}
@@ -190,6 +197,41 @@ func parseInviteURL(raw string) (string, string, string, error) {
 	return parsed.String(), gatewayURL, tlsMode, nil
 }
 
+func normalizeServiceOrigin(raw string) (serviceOrigin, error) {
+	parsed, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return serviceOrigin{}, err
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	switch scheme {
+	case "http", "ws":
+		scheme = "http"
+	case "https", "wss":
+		scheme = "https"
+	default:
+		return serviceOrigin{}, fmt.Errorf("unsupported service origin scheme %q", parsed.Scheme)
+	}
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(parsed.Hostname())), ".")
+	if host == "" {
+		return serviceOrigin{}, fmt.Errorf("service origin host is required")
+	}
+	port := strings.TrimSpace(parsed.Port())
+	if port == "" {
+		if scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	return serviceOrigin{scheme: scheme, host: host, port: port}, nil
+}
+
+func sameServiceOrigin(left string, right string) bool {
+	leftOrigin, leftErr := normalizeServiceOrigin(left)
+	rightOrigin, rightErr := normalizeServiceOrigin(right)
+	return leftErr == nil && rightErr == nil && leftOrigin == rightOrigin
+}
+
 func buildInviteComponents(cfg config.Config, hostComponent *host.Component) []map[string]any {
 	if !cfg.Components.Host.Enabled || hostComponent == nil {
 		return nil
@@ -213,6 +255,10 @@ func buildInviteComponents(cfg config.Config, hostComponent *host.Component) []m
 
 func claimInvite(claimURL string, payload map[string]any) (inviteClaimResponse, error) {
 	var result inviteClaimResponse
+	claimOrigin, err := normalizeServiceOrigin(claimURL)
+	if err != nil {
+		return result, fmt.Errorf("invalid binding invite origin: %w", err)
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return result, err
@@ -227,7 +273,19 @@ func claimInvite(claimURL string, payload map[string]any) (inviteClaimResponse, 
 		return result, err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			redirectOrigin, originErr := normalizeServiceOrigin(request.URL.String())
+			if originErr != nil || redirectOrigin != claimOrigin {
+				return fmt.Errorf("binding invite redirect changed service origin")
+			}
+			return nil
+		},
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return result, err
